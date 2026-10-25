@@ -130,12 +130,43 @@ class TestEvalCli:
 
 
 class TestReport:
+    @staticmethod
+    def _invoice_entry(tmp_path: Path, doc_id: str, expected_invoice, predicted_invoice):
+        # Self-contained copy of the tasks-test helper: test modules are
+        # not importable as a package in CI.
+        gt = tmp_path / "gt" / f"{doc_id}.json"
+        gt.parent.mkdir(parents=True, exist_ok=True)
+        gt.write_text(json.dumps({"id": doc_id, "invoice": expected_invoice}),
+                      encoding="utf-8")
+        pred = tmp_path / "pred" / f"{doc_id}.json"
+        pred.parent.mkdir(parents=True, exist_ok=True)
+        pred.write_text(json.dumps({"source": "x", "invoice": predicted_invoice}),
+                        encoding="utf-8")
+        from documind.evaluation.manifest import ManifestEntry
+
+        return ManifestEntry(id=doc_id, prediction=pred, ground_truth=gt)
+
     def test_invoice_report_lists_field_issues(self, tmp_path):
-        from tests.test_evaluation_tasks import FULL_INVOICE, invoice_entry
         from documind.evaluation.invoice_eval import evaluate_manifest
 
-        predicted = {**FULL_INVOICE, "total": None, "tax": "9.99"}
-        entry = invoice_entry(tmp_path, "doc", FULL_INVOICE, predicted)
+        full_invoice = {
+            "supplier": "MINI MART EXPRESS",
+            "invoice_number": "00001234",
+            "invoice_date": "2026-10-25",
+            "currency": "USD",
+            "subtotal": "12.30",
+            "tax": "1.23",
+            "discount": None,
+            "total": "13.53",
+            "payment_amount": "15.00",
+            "change_amount": "1.47",
+            "line_items": [
+                {"description": "SOAP", "quantity": "2", "unit_price": "2.50",
+                 "line_total": "5.00"},
+            ],
+        }
+        predicted = {**full_invoice, "total": None, "tax": "9.99"}
+        entry = self._invoice_entry(tmp_path, "doc", full_invoice, predicted)
         summary = evaluate_manifest(type("M", (), {"entries": [entry]})())
         report = render_markdown(summary)
         assert "total: missing" in report
