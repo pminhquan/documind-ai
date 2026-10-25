@@ -21,6 +21,12 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
+web = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
+]
 
 [project.scripts]
 documind-ocr = "documind.cli:main"
@@ -28,6 +34,7 @@ documind-extract = "documind.extract_cli:main"
 documind-table = "documind.table_cli:main"
 documind-eval = "documind.evaluation.cli:main"
 documind-dataset = "documind.dataset_cli:main"
+documind-web = "documind.web.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

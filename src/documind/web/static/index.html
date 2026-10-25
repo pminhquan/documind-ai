@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DocuMind AI — Document Intelligence</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>DocuMind AI</h1>
+    <p class="subtitle">Local-first document intelligence — your files never leave this machine.</p>
+  </header>
+
+  <main>
+    <section class="panel" aria-labelledby="upload-heading">
+      <h2 id="upload-heading">1. Select a document</h2>
+      <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
+           aria-label="Choose or drop an image file">
+        <p>Drag &amp; drop an image here, or</p>
+        <label class="button">
+          <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp">
+          Choose file
+        </label>
+        <p class="hint">PNG, JPG, BMP, TIFF, WEBP — max 10 MB</p>
+      </div>
+
+      <div id="preview-wrap" class="preview-wrap hidden">
+        <h2>2. Preview</h2>
+        <div id="preview-container" class="preview-container">
+          <img id="preview-img" alt="Uploaded document preview">
+          <div id="box-overlay" class="box-overlay" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <h2>3. Choose a workflow</h2>
+      <div class="workflow-row">
+        <label for="workflow">Workflow</label>
+        <select id="workflow">
+          <option value="auto" selected>Auto (OCR + Invoice + Tables)</option>
+          <option value="ocr">OCR only</option>
+          <option value="invoice">Invoice extraction</option>
+          <option value="table">Table recognition</option>
+        </select>
+        <button id="run-btn" class="button primary" disabled>Run</button>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="results" class="panel hidden" aria-labelledby="results-heading">
+      <h2 id="results-heading">4. Results</h2>
+
+      <div id="ocr-panel" class="result-block hidden">
+        <h3>Recognized text</h3>
+        <ul id="ocr-list" class="ocr-list"></ul>
+        <div class="export-row">
+          <button class="button" data-export="ocr-json">Export OCR JSON</button>
+        </div>
+      </div>
+
+      <div id="invoice-panel" class="result-block hidden">
+        <h3>Invoice fields <span class="hint">(editable — corrections are kept separate from machine output)</span></h3>
+        <table class="field-table" id="invoice-fields">
+          <tbody><!-- filled by app.js --></tbody>
+        </table>
+        <h4>Line items</h4>
+        <table class="grid" id="line-items-table">
+          <thead>
+            <tr><th>Description</th><th>Quantity</th><th>Unit price</th><th>Line total</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="export-row">
+          <button class="button" data-export="invoice-json">Export JSON</button>
+          <button class="button" id="invoice-reset">Reset corrections</button>
+        </div>
+      </div>
+
+      <div id="tables-panel" class="result-block hidden">
+        <h3>Tables <span class="hint">(editable — corrections are kept separate from machine output)</span></h3>
+        <div id="table-tabs" class="tabs" role="tablist"></div>
+        <div id="tables-grids"></div>
+        <div class="export-row">
+          <button class="button" data-export="table-json">Export JSON</button>
+          <button class="button" data-export="table-csv">Export CSV</button>
+          <button class="button" data-export="table-xlsx">Export XLSX</button>
+          <button class="button" id="tables-reset">Reset corrections</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Runs entirely on this machine (127.0.0.1). Model output ≠ verified truth —
+       review before use. No data leaves this device.</p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
