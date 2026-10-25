@@ -215,6 +215,64 @@ class TestOperationCounts:
         assert "substitutions: 1" in report
 
 
+class TestWorstDocumentsReport:
+    """Error-analysis section: worst documents and problem fields."""
+
+    @staticmethod
+    def _summary_with_two_docs():
+        from documind.evaluation.ocr_eval import evaluate_manifest
+        from documind.evaluation.manifest import ManifestEntry
+
+        entries = []
+        for doc_id, reference, hypothesis in (
+            ("good", "TOTAL 9.57", "TOTAL 9.57"),
+            ("bad", "TOTAL 9.57", "T0TAL 9,57"),
+        ):
+            gt = Path(doc_id + ".gt.json")
+            pred = Path(doc_id + ".pred.json")
+            gt.write_text(json.dumps({"id": doc_id, "reference_text": reference}),
+                          encoding="utf-8")
+            pred.write_text(json.dumps({"full_text": hypothesis}),
+                            encoding="utf-8")
+            entries.append(ManifestEntry(doc_id, pred, gt))
+        return evaluate_manifest(type("M", (), {"entries": entries})())
+
+    def test_ocr_report_names_worst_document_first(self, tmp_path, monkeypatch):
+        from documind.evaluation.report import render_markdown
+
+        monkeypatch.chdir(tmp_path)
+        report = render_markdown(self._summary_with_two_docs())
+        worst_section = report.split("Worst-performing documents")[1]
+        assert worst_section.index("bad") < worst_section.index("good")
+
+    def test_invoice_report_lists_problem_fields(self, tmp_path):
+        from documind.evaluation.invoice_eval import evaluate_manifest
+        from documind.evaluation.report import render_markdown
+
+        full_invoice = {
+            "supplier": "ACME", "invoice_number": "1", "invoice_date": "2026-01-01",
+            "currency": "USD", "subtotal": "10.00", "tax": "1.00",
+            "discount": None, "total": "11.00", "payment_amount": None,
+            "change_amount": None, "line_items": [],
+        }
+        predicted = {**full_invoice, "total": "99.99", "tax": None}
+        gt = tmp_path / "gt.json"
+        gt.write_text(json.dumps({"id": "d", "invoice": full_invoice}),
+                      encoding="utf-8")
+        pred = tmp_path / "pred.json"
+        pred.write_text(json.dumps({"invoice": predicted}), encoding="utf-8")
+        summary = evaluate_manifest(
+            type("M", (), {"entries": [__import__(
+                "documind.evaluation.manifest", fromlist=["ManifestEntry"]
+            ).ManifestEntry("d", pred, gt)]})()
+        )
+        report = render_markdown(summary)
+        assert "Most problematic fields" in report
+        assert "**total**: issues in 1 document(s)" in report
+        assert "**tax**: issues in 1 document(s)" in report
+        assert "Worst-performing documents (lowest field accuracy)" in report
+
+
 class TestReport:
     @staticmethod
     def _invoice_entry(tmp_path: Path, doc_id: str, expected_invoice, predicted_invoice):
