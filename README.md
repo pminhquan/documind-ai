@@ -304,7 +304,10 @@ reports/             evaluation results (m3a, m4a baselines)
 - oneDNN (MKLDNN) is disabled in the engine: the PaddlePaddle 3.x CPU
   Windows build crashes with a PIR attribute error when MKLDNN is on.
 - Single image per invocation; no PDF input yet.
-- Extraction keywords are English-only (`TOTAL`, `CASH`, ...); strictly
+- Extraction supports English and Vietnamese labels (TỔNG CỘNG, THUẾ
+  GTGT, ...) with diacritic-insensitive matching; OCR recognition of
+  Vietnamese text is NOT validated (see docs/extraction-spec.md).
+- Extraction is strictly
   extractive (never derives a line total from qty × price); single-page,
   single-currency documents.
 - Table recognition needs **complete, axis-aligned ruled grids** —

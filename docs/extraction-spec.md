@@ -66,6 +66,27 @@ Command: `documind-extract <ocr-json-path> -o <invoice-json-path>`.
 | 8 | Summary amounts | `extract_summary` | Rows matching `discount / subtotal / tax|vat / cash|paid|payment / change / total`; value = rightmost money token on the row. Multiple `TOTAL` rows: keep the bottom-most; differing values or duplicate labels raise an `ambiguous:` note (review). |
 | 9 | Validation | `validator.apply_validation` | Checks below; sets `validation_status`. |
 
+## Vietnamese labels (M5C)
+
+Language-specific recognition lives in `extraction/lexicon_vi.py`;
+matching is diacritic-insensitive (NFD strip + đ→d + casefold), applied
+to a folded copy of the row text — the OCR text itself is never
+modified. Supported: HÓA ĐƠN/SỐ HÓA ĐƠN, NGÀY LẬP/NGÀY BÁN, TÊN CỬA
+HÀNG/ĐƠN VỊ BÁN HÀNG (labelled values become supplier), TẠM TÍNH/TỔNG
+TIỀN HÀNG → subtotal, THÀNH TIỀN/TỔNG CỘNG/TỔNG THANH TOÁN → total,
+THUẾ GTGT/VAT → tax, GIẢM GIÁ/CHIẾT KHẤU → discount, TIỀN KHÁCH ĐƯA →
+payment, TIỀN THỪA/TIỀN TRẢ LẠI → change, SỐ LƯỢNG…ĐƠN GIÁ header.
+
+Monetary: `đ`/`₫`/VNĐ count as currency only as standalone tokens, so
+"đơn giá" is never currency noise; attached signs (`₫125.000`) are
+stripped as a prefix. `1.234.567` and `1.234.567,89` parse via the
+existing separator rules; a bare "tiền" is never a total.
+
+**Reality check:** these are extraction RULES over OCR output. The
+pinned PP-OCRv6 models were NOT evaluated for Vietnamese text
+recognition (engine default `lang="en"`); real Vietnamese-document
+accuracy remains pending labeled data.
+
 ## Monetary parsing rules
 
 `parse_amount` (deterministic):

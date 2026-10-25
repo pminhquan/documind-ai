@@ -48,9 +48,31 @@ SUPPLIER_STOP_RE = (
     r"www\.|http)"
 )
 
+# Vietnamese label lexicon (diacritic-insensitive; see lexicon_vi.py).
+from .lexicon_vi import (  # noqa: E402
+    CURRENCY_LABEL_VI,
+    DATE_LABEL_VI,
+    DONG_SIGN_RE,
+    HEADER_ROW_VI,
+    INVOICE_NUMBER_LABEL_VI,
+    SUMMARY_LABELS_VI,
+    SUPPLIER_LABEL_VI,
+    VND_WORD_RE,
+    fold_vi,
+)
+
+HEADER_RE = HEADER_RE + "|" + HEADER_ROW_VI
+SUMMARY_START_RE = (
+    SUMMARY_START_RE + r"|" + INVOICE_NUMBER_LABEL_VI.replace(r"\b", r"\b")
+    + r"|\b(tam tinh|tong tien hang|giam gia|chiet khau|thue gtgt|"
+    r"tien khach dua|tien thua|tien tra lai|tong cong|tong thanh toan|"
+    r"thanh tien|tong tien)\b"
+)
+
 # Ordered: a summary row is classified by the FIRST matching pattern, so
 # DISCOUNT/SUBTOTAL must precede TOTAL (regex word boundaries already stop
-# \btotal\b from matching inside "SUBTOTAL", but ordering keeps intent clear).
+# \btotal\b from matching inside "SUBTOTAL", but ordering keeps intent
+# clear). Vietnamese patterns match against the diacritic-folded row text.
 SUMMARY_FIELDS: tuple[tuple[str, str], ...] = (
     ("discount", r"(?i)\bdiscount\b"),
     ("subtotal", r"(?i)\bsub-?total\b"),
@@ -58,6 +80,7 @@ SUMMARY_FIELDS: tuple[tuple[str, str], ...] = (
     ("payment_amount", r"(?i)\b(?:cash|paid|payment)\b"),
     ("change_amount", r"(?i)\bchange\b"),
     ("total", r"(?i)\b(?:grand\s+)?total(?:\s+due)?\b"),
+    *SUMMARY_LABELS_VI,
 )
 
 CURRENCY_LABEL_RE = re.compile(r"(?i)\bcurrency\b\s*[:.]?\s*([A-Za-z]{3})\b")
@@ -65,7 +88,8 @@ INVOICE_NUMBER_RE = re.compile(
     r"(?i)\b(?:receipt|invoice)\s*(?:#|no\.?|num(?:ber)?)?\s*[:#]?\s*"
     r"([A-Za-z0-9][A-Za-z0-9/-]{2,})"
 )
-SYMBOL_TO_CODE = {"$": "USD", "€": "EUR", "£": "GBP", "đ": "VND"}
+SYMBOL_TO_CODE = {"$": "USD", "€": "EUR", "£": "GBP", "đ": "VND", "₫": "VND"}
+DATE_LABELS_RE = re.compile(r"(?i)\bdate\b|" + DATE_LABEL_VI)
 
 MAX_OCR_JSON_BYTES = 50 * 1024 * 1024
 
@@ -99,7 +123,10 @@ def _is_money_token(token: OcrToken) -> bool:
     if not any(ch.isdigit() for ch in cleaned):
         return False
     return bool(
-        re.fullmatch(MONEY_TOKEN_RE, cleaned) or re.fullmatch(r"-?\d+", cleaned)
+        re.fullmatch(MONEY_TOKEN_RE, cleaned)
+        or re.fullmatch(r"-?\d+", cleaned)
+        # Vietnamese grouping without decimals ("10.000", "1.234.567")
+        or re.fullmatch(r"-?\d{1,3}(?:[.,]\d{3})+", cleaned)
     )
 
 
@@ -145,22 +172,44 @@ class _Extractor:
         for line in lines[:3]:
             if not line.text or re.match(SUPPLIER_STOP_RE, line.text):
                 continue
+            # "TÊN CỬA HÀNG: MINIMART" — take the labelled value, not the label.
+            labelled = re.search(
+                r"(?i)(?:ten cua hang|don vi ban hang|cua hang)\s*[:.-]?\s*(.+)",
+                fold_vi(line.text),
+            )
+            if labelled and labelled.group(1).strip():
+                # Preserve the original (diacritic) tail after the label.
+                raw_tail = re.split(r"(?i)[:] ", line.text, maxsplit=1)
+                value = raw_tail[1].strip() if len(raw_tail) == 2 else labelled.group(1)
+                if value:
+                    self.invoice.supplier = value
+                    self._record("supplier", line.tokens[0])
+                    return
             if parse_date(line.text) or _rightmost_amount(line) is not None:
                 continue
+            if re.search(SUPPLIER_LABEL_VI, fold_vi(line.text)):
+                continue  # a bare label line, not a supplier name
             self.invoice.supplier = line.text
             self._record("supplier", line.tokens[0])
             return
 
     def extract_invoice_number(self, lines: list[VisualLine]) -> None:
+        vi_number = re.compile(
+            r"(?:so hoa don|so hd)\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9/-]{2,})"
+        )
         for line in lines:
-            match = re.search(INVOICE_NUMBER_RE, line.text)
+            match = re.search(INVOICE_NUMBER_RE, line.text) or vi_number.search(
+                fold_vi(line.text)
+            )
             if match:
                 self.invoice.invoice_number = match.group(1)
                 self._record("invoice_number", line.tokens[0])
                 return
 
     def extract_date(self, lines: list[VisualLine]) -> None:
-        labelled = [line for line in lines if re.search(r"(?i)\bdate\b", line.text)]
+        labelled = [
+            line for line in lines if DATE_LABELS_RE.search(fold_vi(line.text))
+        ]
         for line in labelled + lines:
             parsed = parse_date(line.text)
             if parsed is not None:
@@ -170,9 +219,16 @@ class _Extractor:
 
     def extract_currency(self, lines: list[VisualLine]) -> None:
         for line in lines:
-            match = re.search(CURRENCY_LABEL_RE, line.text)
+            match = re.search(CURRENCY_LABEL_RE, line.text) or re.search(
+                CURRENCY_LABEL_VI + r"\s*[:.]?\s*([A-Za-z]{3})", fold_vi(line.text)
+            )
             if match:
                 self.invoice.currency = match.group(1).upper()
+                self._record("currency", line.tokens[0])
+                return
+        for line in lines:
+            if VND_WORD_RE.search(line.text) or DONG_SIGN_RE.search(line.text):
+                self.invoice.currency = "VND"
                 self._record("currency", line.tokens[0])
                 return
         for line in lines:
@@ -187,10 +243,10 @@ class _Extractor:
     def extract_line_items(self, lines: list[VisualLine]) -> None:
         """Extract line items between the table header and the summary zone.
 
-        With a header row (``QTY ... PRICE``), items start on the next
-        line. Without one, the first three lines are treated as
-        letterhead and every later amount-bearing row is a candidate.
-        Amount-free rows inside the item region are description
+        With a header row (``QTY ... PRICE`` / ``SỐ LƯỢNG ... ĐƠN GIÁ``),
+        items start on the next line. Without one, the first three lines
+        are treated as letterhead and every later amount-bearing row is a
+        candidate. Amount-free rows inside the item region are description
         continuations of the next parsed row (multi-line product names).
         """
         header_index = next(
@@ -198,6 +254,7 @@ class _Extractor:
                 position
                 for position, line in enumerate(lines)
                 if re.search(HEADER_RE, line.text)
+                or re.search(HEADER_RE, fold_vi(line.text))
             ),
             None,
         )
@@ -205,7 +262,9 @@ class _Extractor:
         pending_description: list[tuple[str, OcrToken]] = []
 
         for line in lines[start:]:
-            if re.search(SUMMARY_START_RE, line.text):
+            if re.search(SUMMARY_START_RE, line.text) or re.search(
+                SUMMARY_START_RE, fold_vi(line.text)
+            ):
                 break  # summary zone reached: item region ended
             if not _line_has_amount(line) and not QTY_PRICE_RE.search(line.text):
                 pending_description.append((line.text, line.tokens[0]))
@@ -228,13 +287,17 @@ class _Extractor:
         summary_zone = False
 
         for line in lines:
-            if not summary_zone and re.search(SUMMARY_START_RE, line.text):
+            folded = fold_vi(line.text)
+            if not summary_zone and (
+                re.search(SUMMARY_START_RE, line.text)
+                or re.search(SUMMARY_START_RE, folded)
+            ):
                 summary_zone = True
             if not summary_zone:
                 continue
             matched_field = None
             for field_name, pattern in SUMMARY_FIELDS:
-                if re.search(pattern, line.text):
+                if re.search(pattern, line.text) or re.search(pattern, folded):
                     matched_field = field_name
                     break
             if matched_field is None:
