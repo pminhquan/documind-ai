@@ -31,7 +31,7 @@ preprocessing.prepare_image()    → PreprocessingError (exit code 1)
    │  (context manager: tạo PNG tạm nếu ảnh không phải RGB)
    ▼
 engine.PaddleOcrEngine.predict() → OcrEngineError (exit code 1)
-   │  (det + rec: PP-OCRv5, lần đầu tự tải model)
+   │  (det + rec: PP-OCRv6, ghim tường minh trong engine; lần đầu tự tải model)
    ▼
 results.normalize_result()       → OcrResult(TextBox[text, confidence, box])
    │

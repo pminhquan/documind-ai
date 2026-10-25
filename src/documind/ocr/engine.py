@@ -10,13 +10,21 @@ class OcrEngineError(RuntimeError):
     """Raised when the OCR engine cannot be initialized or run."""
 
 
+# Model names verified with paddleocr 3.7.0 (loaded from
+# ~/.paddlex/official_models on first use). Pinned explicitly so a future
+# change of upstream defaults cannot silently change OCR behavior.
+DEFAULT_DETECTION_MODEL = "PP-OCRv6_medium_det"
+DEFAULT_RECOGNITION_MODEL = "PP-OCRv6_medium_rec"
+
+
 class PaddleOcrEngine:
     """CPU-first OCR engine based on pretrained PaddleOCR 3.x models.
 
-    PP-OCRv5 text detection + recognition models are downloaded on first
-    use into the user-level PaddleOCR cache (outside the repository).
-    Document-classification stages are disabled to keep the baseline
-    minimal and CPU-friendly.
+    Uses PP-OCRv6 text detection + recognition (explicitly pinned via
+    ``text_detection_model_name`` / ``text_recognition_model_name``).
+    Models are downloaded on first use into the user-level PaddleOCR cache
+    (outside the repository). Document-classification stages are disabled
+    to keep the baseline minimal and CPU-friendly.
     """
 
     def __init__(self, lang: str = "en", enable_mkldnn: bool = False) -> None:
@@ -30,6 +38,8 @@ class PaddleOcrEngine:
         try:
             self._ocr = PaddleOCR(
                 lang=lang,
+                text_detection_model_name=DEFAULT_DETECTION_MODEL,
+                text_recognition_model_name=DEFAULT_RECOGNITION_MODEL,
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 use_textline_orientation=False,
