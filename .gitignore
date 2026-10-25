@@ -32,6 +32,12 @@ models/
 outputs/
 *.log
 
+# Real-document evaluation data stays local by default (privacy):
+# raw documents, anonymized images, annotations, predictions, reports.
+# Committing anonymized ground truth later is an explicit, reviewed
+# decision (see docs/dataset-annotation-guide.md).
+data/eval/real/
+
 # Downloaded model weights / OCR caches
 .paddleocr/
 .paddlex/
