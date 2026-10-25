@@ -228,6 +228,65 @@ class TestItemMetricCorrectness:
         assert line_items["item_f1"] is None
 
 
+    def test_incorrect_matched_item_counts_as_fp_and_fn(self, tmp_path):
+        """Regression: a matched pair with wrong fields was neither TP nor
+        FP/FN, so one correct + one incorrect item scored P=R=F1=1.0.
+        Strict semantics: incorrect matched item = 1 FP + 1 FN."""
+        predicted = self.predicted_items([
+            FULL_INVOICE["line_items"][0],
+            {"description": "MILK 2L", "quantity": "1", "unit_price": "2.50",
+             "line_total": "2.50"},
+        ])
+        entry = invoice_entry(tmp_path, "doc", FULL_INVOICE, predicted)
+        line_items = eval_invoices(
+            type("M", (), {"entries": [entry]})()
+        )["documents"][0]["line_items"]
+        assert line_items["items_matched"] == 1
+        assert line_items["items_incorrect"] == 1
+        assert line_items["missing_items"] == 0
+        assert line_items["extra_items"] == 0
+        assert line_items["item_precision"] == 0.5
+        assert line_items["item_recall"] == 0.5
+        assert line_items["item_f1"] == 0.5
+
+    def test_all_items_incorrect_scores_zero(self, tmp_path):
+        predicted = self.predicted_items([
+            {"description": "SOAP X", "quantity": "9", "unit_price": "9.00",
+             "line_total": "9.00"},
+            {"description": "MILK 2L", "quantity": "9", "unit_price": "9.00",
+             "line_total": "9.00"},
+        ])
+        entry = invoice_entry(tmp_path, "doc", FULL_INVOICE, predicted)
+        line_items = eval_invoices(
+            type("M", (), {"entries": [entry]})()
+        )["documents"][0]["line_items"]
+        assert line_items["item_precision"] == 0.0
+        assert line_items["item_recall"] == 0.0
+        assert line_items["item_f1"] == 0.0
+
+    def test_micro_aggregation_counts_incorrect_pairs(self, tmp_path):
+        # doc1: one correct + one incorrect (TP=1, FP=1, FN=1)
+        # doc2: one correct  (TP=1)
+        # micro: TP=2, FP=1, FN=1 -> P=R=F1=2/3
+        entries = []
+        entries.append(invoice_entry(
+            tmp_path, "doc1", FULL_INVOICE, self.predicted_items([
+                FULL_INVOICE["line_items"][0],
+                {"description": "MILK 2L", "quantity": "1", "unit_price": "2.50",
+                 "line_total": "2.50"},
+            ])
+        ))
+        entries.append(invoice_entry(
+            tmp_path, "doc2",
+            {**FULL_INVOICE, "line_items": [FULL_INVOICE["line_items"][0]]},
+            self.predicted_items([FULL_INVOICE["line_items"][0]]),
+        ))
+        aggregate = eval_invoices(type("M", (), {"entries": entries})())["aggregate"]
+        assert aggregate["item_precision"] == pytest.approx(2 / 3)
+        assert aggregate["item_recall"] == pytest.approx(2 / 3)
+        assert aggregate["item_f1"] == pytest.approx(2 / 3)
+
+
 class TestTableEvaluation:
     @staticmethod
     def truth(rows, columns, cells):

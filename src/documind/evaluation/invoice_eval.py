@@ -131,7 +131,14 @@ def _compare_amount(expected, predicted) -> FieldOutcome:
 
 
 def _prf(true_positives: int, false_positives: int, false_negatives: int) -> dict:
-    """Item-level precision/recall/F1 (None when nothing is measurable)."""
+    """Item-level precision/recall/F1 under strict item matching.
+
+    Zero-denominator conventions: precision is ``None`` when the
+    prediction contains no items at all (TP + FP == 0), recall is
+    ``None`` when the ground truth contains no items (TP + FN == 0), and
+    F1 is ``None`` when either is ``None`` but ``0.0`` when both are
+    defined and sum to zero.
+    """
     precision = (
         true_positives / (true_positives + false_positives)
         if true_positives + false_positives else None
@@ -199,25 +206,35 @@ def _compare_line_items(expected_items, predicted_items) -> dict:
                               "fields": fields})
 
     true_positives = matched_items
+    incorrect_items = sum(1 for o in item_outcomes if o["status"] == INCORRECT)
     false_negatives = sum(1 for o in item_outcomes if o["status"] == MISSING)
     false_positives = sum(1 for o in item_outcomes if o["status"] == EXTRA)
+    # Strict item matching: a matched pair whose fields are wrong failed
+    # both as a prediction (FP) and as an answer (FN), so it counts once
+    # in each. Missing items are FNs; extra items are FPs.
+    false_positives += incorrect_items
+    false_negatives += incorrect_items
     item_metrics = _prf(true_positives, false_positives, false_negatives)
 
     return {
         "expected_items": len(expected_items),
         "predicted_items": len(predicted_items),
         "items_matched": matched_items,
+        "items_incorrect": incorrect_items,
         "item_field_accuracy": (
             field_correct / field_total if field_total else None
         ),
         "item_field_accuracy_scope": (
             "field correctness among matched item pairs; item-level "
-            "precision/recall/F1 reflect missing and extra items"
+            "precision/recall/F1 use strict item matching (incorrect "
+            "pairs count as one FP and one FN each)"
         ),
         "item_field_correct": field_correct,
         "item_field_total": field_total,
-        "missing_items": false_negatives,
-        "extra_items": false_positives,
+        "missing_items": false_negatives - incorrect_items,
+        "extra_items": false_positives - incorrect_items,
+        "false_positives": false_positives,
+        "false_negatives": false_negatives,
         **item_metrics,
         "items": item_outcomes,
         "matching_assumption": "index-based (reading order preserved)",
@@ -300,8 +317,8 @@ def evaluate_manifest(manifest) -> dict:
         item_field_correct += line_items["item_field_correct"]
         item_field_total += line_items["item_field_total"]
         total_tp += line_items["items_matched"]
-        total_fp += line_items["extra_items"]
-        total_fn += line_items["missing_items"]
+        total_fp += line_items["false_positives"]
+        total_fn += line_items["false_negatives"]
 
     macro = (sum(accuracies) / len(accuracies)) if accuracies else None
     micro = (total_matched / total_applicable) if total_applicable else None
