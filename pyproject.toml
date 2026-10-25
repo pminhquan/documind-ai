@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "documind-ai"
 version = "0.1.0"
-description = "DocuMind AI - Document Intelligence Platform (M0/M1: OCR baseline)"
+description = "DocuMind AI - Document Intelligence Platform (OCR, invoice extraction, ruled tables, evaluation)"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.6",
 ]
 
 [project.scripts]
@@ -35,3 +36,12 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-ra"
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF", "ISC", "FURB"]
+ignore = ["SIM108", "SIM102"]  # ternary/collapse rewrites hurt readability here
+allowed-confusables = ["–", "×", "—", "’"]  # intentional: dash stripping, qty x price

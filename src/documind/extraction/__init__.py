@@ -12,14 +12,14 @@ from .models import (
 )
 
 __all__ = [
-    "OcrInputError",
-    "extract",
-    "load_ocr_document",
     "STATUS_INVALID",
     "STATUS_OK",
     "STATUS_REVIEW",
     "ExtractionResult",
     "Invoice",
     "LineItem",
+    "OcrInputError",
     "Provenance",
+    "extract",
+    "load_ocr_document",
 ]

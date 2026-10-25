@@ -24,7 +24,7 @@ item list is never reported as a subtotal mismatch.
 
 from decimal import Decimal
 
-from .models import Invoice, STATUS_INVALID, STATUS_OK, STATUS_REVIEW
+from .models import STATUS_INVALID, STATUS_OK, STATUS_REVIEW, Invoice
 
 AMBIGUITY_PREFIX = "ambiguous:"
 INCOMPLETE_PREFIX = "incomplete:"
@@ -48,13 +48,13 @@ def validate_invoice(invoice: Invoice) -> list[str]:
     if invoice.subtotal is not None and invoice.line_items:
         line_totals = [item.line_total for item in invoice.line_items]
         if all(total is not None for total in line_totals):
-            if sum(line_totals, Decimal("0")) != invoice.subtotal:
+            if sum(line_totals, Decimal(0)) != invoice.subtotal:
                 errors.append("subtotal != sum(line_items.line_total)")
 
     if invoice.total is not None and invoice.subtotal is not None:
         if invoice.tax is not None or invoice.discount is not None:
-            expected = invoice.subtotal + (invoice.tax or Decimal("0")) - (
-                invoice.discount or Decimal("0")
+            expected = invoice.subtotal + (invoice.tax or Decimal(0)) - (
+                invoice.discount or Decimal(0)
             )
             if invoice.total != expected:
                 errors.append("total != subtotal + tax - discount")

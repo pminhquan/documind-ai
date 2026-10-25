@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from documind.evaluation.invoice_eval import evaluate_manifest as eval_invoices
-from documind.evaluation.table_eval import evaluate_manifest as eval_tables
 from documind.evaluation.manifest import ManifestEntry
+from documind.evaluation.table_eval import evaluate_manifest as eval_tables
 
 
 def write_json(path: Path, data) -> Path:

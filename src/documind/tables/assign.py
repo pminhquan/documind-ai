@@ -10,7 +10,7 @@ Text is never invented: a cell without assigned regions stays "".
 """
 
 from .geometry import GridGeometry
-from .models import TableCell, Rect
+from .models import Rect, TableCell
 
 UNASSIGNABLE = -1
 

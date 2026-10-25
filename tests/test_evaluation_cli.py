@@ -220,8 +220,8 @@ class TestWorstDocumentsReport:
 
     @staticmethod
     def _summary_with_two_docs():
-        from documind.evaluation.ocr_eval import evaluate_manifest
         from documind.evaluation.manifest import ManifestEntry
+        from documind.evaluation.ocr_eval import evaluate_manifest
 
         entries = []
         for doc_id, reference, hypothesis in (
@@ -318,8 +318,8 @@ class TestReport:
         assert "Micro field accuracy" in report
 
     def test_table_report_mentions_aggregates(self, tmp_path):
-        from documind.evaluation.table_eval import evaluate_manifest
         from documind.evaluation.manifest import ManifestEntry
+        from documind.evaluation.table_eval import evaluate_manifest
 
         truth = {"rows": 1, "columns": 1, "cells": [["A"]]}
         prediction = {"tables": [{"table_id": "table_0", "rows": 1, "columns": 1,

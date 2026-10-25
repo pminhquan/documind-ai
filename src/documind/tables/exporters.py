@@ -1,7 +1,6 @@
 """Export table results to JSON, CSV, and editable XLSX."""
 
 import csv
-import json
 import re
 from pathlib import Path
 
@@ -59,7 +58,9 @@ def export_json(result: TableResult, path: str | Path, indent: int | None = 2) -
 
 
 def _csv_paths(base: Path, table_count: int) -> list[Path]:
-    if table_count <= 1:
+    if table_count == 0:
+        return []
+    if table_count == 1:
         return [base]
     return [base.with_name(f"{base.stem}_t{index}{base.suffix}")
             for index in range(table_count)]
@@ -73,7 +74,7 @@ def export_csv(result: TableResult, path: str | Path) -> list[Path]:
     base = Path(path)
     base.parent.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    for table, target in zip(result.tables, _csv_paths(base, len(result.tables))):
+    for table, target in zip(result.tables, _csv_paths(base, len(result.tables)), strict=True):
         with target.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerows(

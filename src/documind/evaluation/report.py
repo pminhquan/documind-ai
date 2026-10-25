@@ -49,8 +49,8 @@ def _provenance_lines(summary: dict) -> list[str]:
 def _ocr_report(summary: dict) -> list[str]:
     aggregate = summary["aggregate"]
     lines = [
-        "| Document | CER | WER | Substitutions | Insertions | Deletions "
-        "| CER edits / ref chars |",
+        ("| Document | CER | WER | Substitutions | Insertions | Deletions "
+         "| CER edits / ref chars |"),
         "|---|---|---|---|---|---|---|",
     ]
     for document in summary["documents"]:
@@ -63,16 +63,16 @@ def _ocr_report(summary: dict) -> list[str]:
         )
     lines += [
         "",
-        f"**Micro aggregate:** CER {_fmt(aggregate['cer'])}, "
-        f"WER {_fmt(aggregate['wer'])} "
-        f"({aggregate['cer_total_edits']} char edits over "
-        f"{aggregate['cer_total_reference_chars']} reference characters; "
-        f"{aggregate['wer_total_edits']} word edits over "
-        f"{aggregate['wer_total_reference_words']} reference words).",
+        (f"**Micro aggregate:** CER {_fmt(aggregate['cer'])}, "
+         f"WER {_fmt(aggregate['wer'])} "
+         f"({aggregate['cer_total_edits']} char edits over "
+         f"{aggregate['cer_total_reference_chars']} reference characters; "
+         f"{aggregate['wer_total_edits']} word edits over "
+         f"{aggregate['wer_total_reference_words']} reference words)."),
         "",
-        f"**Edit mix:** substitutions: {aggregate.get('substitutions', 0)}, "
-        f"insertions: {aggregate.get('insertions', 0)}, "
-        f"deletions: {aggregate.get('deletions', 0)}.",
+        (f"**Edit mix:** substitutions: {aggregate.get('substitutions', 0)}, "
+         f"insertions: {aggregate.get('insertions', 0)}, "
+         f"deletions: {aggregate.get('deletions', 0)}."),
         "",
         "### Worst-performing documents (highest CER)",
         "",
@@ -106,8 +106,8 @@ def _ocr_report(summary: dict) -> list[str]:
 def _invoice_report(summary: dict) -> list[str]:
     aggregate = summary["aggregate"]
     lines = [
-        "| Document | Field accuracy | Matched | Missing | Extra | Incorrect "
-        "| Item P | Item R | Item F1 | Items matched (expected/predicted) |",
+        ("| Document | Field accuracy | Matched | Missing | Extra | Incorrect "
+         "| Item P | Item R | Item F1 | Items matched (expected/predicted) |"),
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for document in summary["documents"]:
@@ -125,16 +125,16 @@ def _invoice_report(summary: dict) -> list[str]:
         )
     lines += [
         "",
-        f"**Micro field accuracy:** {_fmt(aggregate['micro_field_accuracy'])} "
-        f"({aggregate['fields_matched']}/{aggregate['fields_applicable']}); "
-        f"**macro:** {_fmt(aggregate['macro_field_accuracy'])}; "
-        f"item field accuracy (matched pairs): "
-        f"{_fmt(aggregate['item_field_accuracy'])} "
-        f"({aggregate['item_field_correct']}/{aggregate['item_field_total']}); "
-        f"item precision {_fmt(aggregate['item_precision'])} / recall "
-        f"{_fmt(aggregate['item_recall'])} / F1 {_fmt(aggregate['item_f1'])}; "
-        f"missing line items {aggregate['missing_line_items']}, "
-        f"extra line items {aggregate['extra_line_items']}.",
+        (f"**Micro field accuracy:** {_fmt(aggregate['micro_field_accuracy'])} "
+         f"({aggregate['fields_matched']}/{aggregate['fields_applicable']}); "
+         f"**macro:** {_fmt(aggregate['macro_field_accuracy'])}; "
+         f"item field accuracy (matched pairs): "
+         f"{_fmt(aggregate['item_field_accuracy'])} "
+         f"({aggregate['item_field_correct']}/{aggregate['item_field_total']}); "
+         f"item precision {_fmt(aggregate['item_precision'])} / recall "
+         f"{_fmt(aggregate['item_recall'])} / F1 {_fmt(aggregate['item_f1'])}; "
+         f"missing line items {aggregate['missing_line_items']}, "
+         f"extra line items {aggregate['extra_line_items']}."),
         "",
         f"Evaluated fields: {', '.join(SCALAR_FIELDS)} + line_items.",
         "",
@@ -186,8 +186,9 @@ def _invoice_report(summary: dict) -> list[str]:
 def _table_report(summary: dict) -> list[str]:
     aggregate = summary["aggregate"]
     lines = [
-        "| Document | Expected | Predicted | Missed | Extra | Structure OK "
-        "| Cells matched | Exact agreement | Prediction precision | Strict agreement |",
+        ("| Document | Expected | Predicted | Missed | Extra | Structure OK "
+         "| Cells matched | Exact agreement | Prediction precision "
+         "| Strict agreement |"),
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for document in summary["documents"]:
@@ -208,22 +209,23 @@ def _table_report(summary: dict) -> list[str]:
         )
     lines += [
         "",
-        f"**Aggregate:** cell exact agreement {_fmt(aggregate['cell_exact_agreement'])} "
-        f"({aggregate['cells_matched']}/{aggregate['cells_total']} expected "
-        f"reference cells — extra predictions do not enter this denominator); "
-        f"**prediction precision** {_fmt(aggregate['prediction_precision'])}; "
-        f"**strict cell agreement** {_fmt(aggregate['strict_cell_agreement'])}; "
-        f"non-empty agreement {_fmt(aggregate['non_empty_agreement'])}; "
-        f"empty-cell preservation {_fmt(aggregate['empty_cell_preservation'])}; "
-        f"tables expected {aggregate['tables_expected']}, predicted "
-        f"{aggregate['tables_predicted']}, missed {aggregate['tables_missed']}, "
-        f"extra {aggregate['tables_extra']}; structure-ok documents "
-        f"{aggregate['structure_ok_documents']}/{len(summary['documents'])}.",
+        (f"**Aggregate:** cell exact agreement "
+         f"{_fmt(aggregate['cell_exact_agreement'])} "
+         f"({aggregate['cells_matched']}/{aggregate['cells_total']} expected "
+         f"reference cells — extra predictions do not enter this denominator); "
+         f"**prediction precision** {_fmt(aggregate['prediction_precision'])}; "
+         f"**strict cell agreement** {_fmt(aggregate['strict_cell_agreement'])}; "
+         f"non-empty agreement {_fmt(aggregate['non_empty_agreement'])}; "
+         f"empty-cell preservation {_fmt(aggregate['empty_cell_preservation'])}; "
+         f"tables expected {aggregate['tables_expected']}, predicted "
+         f"{aggregate['tables_predicted']}, missed {aggregate['tables_missed']}, "
+         f"extra {aggregate['tables_extra']}; structure-ok documents "
+         f"{aggregate['structure_ok_documents']}/{len(summary['documents'])}."),
         "",
-        f"Missing cells {aggregate['missing_cells']}, extra cells "
-        f"{aggregate['extra_cells']} (including out-of-shape, duplicate, and "
-        f"invalid-coordinate predictions), incorrect cells "
-        f"{aggregate['incorrect_cells']}.",
+        (f"Missing cells {aggregate['missing_cells']}, extra cells "
+         f"{aggregate['extra_cells']} (including out-of-shape, duplicate, and "
+         f"invalid-coordinate predictions), incorrect cells "
+         f"{aggregate['incorrect_cells']}."),
         "",
         "### Worst-performing documents (lowest strict cell agreement)",
         "",
