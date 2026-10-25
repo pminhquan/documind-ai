@@ -47,7 +47,10 @@ Command: `documind-extract <ocr-json-path> -o <invoice-json-path>`.
 - Provenance keys: `supplier`, `invoice_number`, `invoice_date`,
   `currency`, `subtotal`, `tax`, `discount`, `total`,
   `payment_amount`, `change_amount`, `line_items[i].description`,
-  `line_items[i].line_total`.
+  `line_items[i].quantity`, `line_items[i].unit_price`,
+  `line_items[i].line_total`. Every entry points at the OCR region the
+  value was actually parsed from (for multi-line descriptions: the
+  first description-continuation region).
 
 ## Pipeline stages
 
@@ -74,22 +77,44 @@ Command: `documind-extract <ocr-json-path> -o <invoice-json-path>`.
 - Only `.` → thousands if `1.234.567`-shaped and not `\d+.\d{1,2}`,
   else decimal (`12.30` → 12.30, `1.234` → 1234).
 - Currency symbols/words (`$ € £ ¥ đ usd vnd ...`) are stripped first.
+- The money-token fallback (`MONEY_TOKEN_RE`) accepts **unbounded
+  ungrouped integer digits** (`1234.56`, `12345.67`, `1234567,89` all
+  match completely) and uses lookarounds so a malformed run
+  (`12.34.56.78`) matches **nothing** instead of a substring — a value
+  that cannot be parsed reliably stays `null`.
+- When a row holds several candidates, the **rightmost complete match**
+  wins.
 - A bare token qualifies as money only with an explicit 2-decimal
   fraction or being an integer token — descriptions like `EGGS X12`
   are never amounts.
 
-## Validation checks (only when both operands exist)
+## Validation semantics
+
+Completeness and arithmetic consistency are judged separately:
+
+| Status | Meaning |
+|---|---|
+| `ok` | Sufficiently complete, no arithmetic inconsistency, no ambiguity. |
+| `review_required` | Critical information missing/incomplete (`incomplete:` notes) or ambiguous (`ambiguous:` notes). |
+| `invalid` | An arithmetic inconsistency is demonstrated by sufficient extracted operands. |
+
+**Sufficiently complete (M2 baseline)** = at least one *monetary
+anchor* — a grand total, a subtotal, or a line item carrying a
+`line_total` — AND at least one *identification field* (supplier,
+invoice number, or invoice date). Optional fields (tax, discount,
+payment, change) never affect completeness when absent from the
+document.
+
+## Validation checks (only when all operands exist)
 
 | Check | Error string |
 |---|---|
 | `quantity × unit_price == line_total` per item | `line_items[i]: quantity x unit_price != line_total` |
-| `sum(line_totals) == subtotal` | `subtotal != sum(line_items.line_total)` |
+| `sum(line_totals) == subtotal` — requires **every** extracted line item to have a `line_total`; a partially extracted item list is never reported as a mismatch | `subtotal != sum(line_items.line_total)` |
 | `total == subtotal + tax - discount` (or `== subtotal` when neither exists) | `total != subtotal + tax - discount` |
 | `change == payment - total` | `change_amount != payment_amount - total` |
 
-Status: any arithmetic error → `invalid`; only `ambiguous:` notes →
-`review_required`; otherwise `ok`. Missing values never produce errors —
-absence is not an inconsistency.
+Missing values never produce errors — absence is not an inconsistency.
 
 ## Explicit limitations (M2 baseline)
 
