@@ -460,22 +460,33 @@ function buildExportPayload(kind) {
       filename: "invoice-result.json",
     };
   }
+  if (kind === "batch-zip") {
+    // Success-only file list; failures are exported explicitly as an
+    // error report instead of silently becoming fake OCR results.
+    const succeeded = state.batchResults.filter((result) => !result.error);
+    const failed = state.batchResults.filter((result) => result.error);
+    const files = succeeded.map((result, index) => {
+      const stem = (result.filename || `doc_${index}`).replace(/\.[^.]+$/, "");
+      const extension = result.kind.split("-")[1] === "json" ? "json"
+        : result.kind.split("-")[1];
+      return { kind: result.kind, filename: `${stem}.${extension}`,
+               data: result.data };
+    });
+    if (failed.length) {
+      files.push({
+        kind: "ocr-json",
+        filename: "batch-errors.json",
+        data: { failed_documents: failed.map((result) => ({
+          filename: result.filename, error: result.error })) },
+      });
+    }
+    return { kind, data: { files }, filename: "batch-exports.zip" };
+  }
   const tablesPayload = {
     machine_output: machine.tables || null,
     user_corrections: pickCorrections("tables"),
   };
   return { kind, data: tablesPayload, filename: "tables-result" };
-}
-
-if (kind === "batch-zip") {
-  const files = state.batchResults.map((result, index) => {
-    const stem = (result.filename || `doc_${index}`).replace(/\.[^.]+$/, "");
-    const extension = result.kind.split("-")[1] === "json" ? "json"
-      : result.kind.split("-")[1];
-    return { kind: result.kind, filename: `${stem}.${extension}`,
-             data: result.data };
-  });
-  return { kind, data: { files }, filename: "batch-exports.zip" };
 }
 
 function pickCorrections(prefix) {
