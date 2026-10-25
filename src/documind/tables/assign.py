@@ -14,6 +14,12 @@ from .models import TableCell, Rect
 
 UNASSIGNABLE = -1
 
+# Two OCR regions share a visual line when their vertical centers differ
+# by at most this fraction of the smaller box height (vertical jitter
+# tolerance). Lines are ordered top-to-bottom; tokens within a line by
+# horizontal center.
+LINE_TOLERANCE = 0.5
+
 
 def _region_center(item: dict) -> tuple[float, float] | None:
     box = item.get("box")
@@ -39,6 +45,55 @@ def _region_rect(item: dict) -> Rect | None:
     return Rect(
         x=int(min(xs)), y=int(min(ys)), w=int(max(xs) - min(xs)), h=int(max(ys) - min(ys))
     )
+
+
+def _box_height(item: dict) -> float:
+    box = item.get("box")
+    try:
+        ys = [float(point[1]) for point in box]
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+    return max(ys) - min(ys)
+
+
+def _reading_order(members: list[tuple[int, dict]]) -> list[tuple[int, dict]]:
+    """Order ``(index, item)`` pairs top-to-bottom, left-to-right within
+    each visual line.
+
+    Regions whose vertical centers differ by more than
+    ``LINE_TOLERANCE`` of the smaller box height start a new line
+    (grouped against the first token of the current line); tokens within
+    a line are ordered by horizontal center. Regions without a usable
+    box keep their original relative order at the end.
+    """
+    boxed: list[tuple[float, float, int, dict]] = []
+    unboxed: list[tuple[int, dict]] = []
+    for index, item in members:
+        center = _region_center(item)
+        if center is None:
+            unboxed.append((index, item))
+        else:
+            boxed.append((center[1], center[0], index, item))  # (cy, cx)
+    boxed.sort(key=lambda entry: (entry[0], entry[1]))
+
+    ordered: list[tuple[int, dict]] = []
+    line: list[tuple[float, int, dict]] = []  # (cx, index, item)
+    line_cy = line_height = 0.0
+
+    def flush() -> None:
+        nonlocal line
+        ordered.extend((index, item) for _, index, item in sorted(line))
+        line = []
+
+    for cy, cx, index, item in boxed:
+        if line and abs(cy - line_cy) > LINE_TOLERANCE * min(line_height, _box_height(item)):
+            flush()
+        if not line:
+            line_cy, line_height = cy, _box_height(item)
+        line.append((cx, index, item))
+    flush()
+    ordered.extend(unboxed)
+    return ordered
 
 
 def assign_ocr_to_cells(
@@ -84,16 +139,11 @@ def assign_ocr_to_cells(
 
     table_cells: list[TableCell] = []
     for row, col, rect in grid.cells():
-        members = cells.get((row, col), [])
-        members.sort(
-            key=lambda pair: (
-                _region_center(pair[1]) or (float("inf"), float("inf"))
-            )
-        )
-        text = " ".join(str(pair[1].get("text")) for pair in members).strip()
+        ordered = _reading_order(cells.get((row, col), []))
+        text = " ".join(str(pair[1].get("text")) for pair in ordered).strip()
         confidences = [
             float(pair[1]["confidence"])
-            for pair in members
+            for pair in ordered
             if pair[1].get("confidence") is not None
         ]
         table_cells.append(
@@ -102,7 +152,7 @@ def assign_ocr_to_cells(
                 column_index=col,
                 text=text,
                 bounding_box=rect.to_polygon(),
-                source_ocr_indices=[pair[0] for pair in members],
+                source_ocr_indices=[pair[0] for pair in ordered],
                 confidence=(
                     sum(confidences) / len(confidences) if confidences else None
                 ),

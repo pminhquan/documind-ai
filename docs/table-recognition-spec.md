@@ -42,10 +42,13 @@ For each OCR region: the cell containing the **box center** wins; if the
 center misses every cell (e.g. a box overshooting a rule), the cell with
 the **largest box/cell intersection area** takes it. Regions matching no
 cell are reported in `warnings` ("N OCR region(s) outside the detected
-grid") — never dropped silently, never forced into a cell. Multiple
-regions per cell join with a space in reading order (y then x). Empty
-cells keep `text: ""`, empty `source_ocr_indices`, `confidence: null` —
-no text is ever invented.
+grid") — never dropped silently, never forced into a cell. Regions
+inside one cell are ordered **top-to-bottom, left-to-right within each
+visual line**: regions whose vertical centers differ by at most 50 % of
+the smaller box height share a line (jitter tolerance, grouped against
+the first token of the line); `source_ocr_indices` follows the same
+order as the joined text. Empty cells keep `text: ""`, empty
+`source_ocr_indices`, `confidence: null` — no text is ever invented.
 
 ## Output schema
 
@@ -71,12 +74,21 @@ no text is ever invented.
 
 ## Exports
 
-- **JSON** — full schema above (default: `outputs/<stem>.tables.json`).
+- **JSON** — full schema above (default: `outputs/<stem>.tables.json`),
+  raw recognized text unchanged.
 - **CSV** — one file per table; a single table uses the exact `--csv`
   path, multiple tables get `_t0`, `_t1` suffixes. Empty cells are empty
-  fields.
+  fields. **Zero tables write no files.** Because CSV has no cell-type
+  metadata, values whose first non-whitespace character is `=`, `+`,
+  `@`, or a non-numeric `-` receive the standard quote-prefix escape
+  (`'` at position 0, original text preserved); a plain negative
+  decimal like `-5.00` is kept unchanged.
 - **XLSX** — one workbook, one sheet per table (`table_0`, ...), plain
-  editable values at `(row+1, col+1)`.
+  editable values at `(row+1, col+1)`. All values are stored with
+  explicit string semantics (`data_type "s"`), so OCR text can never
+  become a formula cell; XML-illegal control characters are stripped
+  from XLSX values only. **Zero tables produce a valid workbook with
+  one empty default sheet.**
 
 Exit codes: `0` success (including "no table detected" — reported via
 warnings), `2` invalid input (missing/unsupported/empty file, bad OCR

@@ -19,6 +19,36 @@ def item(text, cx, cy, confidence=0.95, index=None):
     return payload
 
 
+class TestReadingOrder:
+    """Regression: the old sort key was (center_x, center_y), which put a
+    bottom-left token before a top-right one across line boundaries.
+    Reading order must be top-to-bottom, then left-to-right within a line
+    (line tolerance: 50% of the smaller box height)."""
+
+    def test_top_line_before_bottom_despite_x_order(self):
+        # Cell (0, 1) spans x in [10, 20), y in [0, 10); both boxes are
+        # 6 px tall -> line tolerance 3 px. "Total" sits top-right,
+        # "13.50" bottom-left; the old x-first sort reversed them.
+        items = [item("Total", 17, 3), item("13.50", 11, 8)]
+        cells, _ = assign_ocr_to_cells(make_grid(), items)
+        assert cells[1].text == "Total 13.50"
+        assert cells[1].source_ocr_indices == [0, 1]
+
+    def test_small_jitter_within_one_line_keeps_x_order(self):
+        # y centers 4 and 5 (diff 1 <= tolerance 3): same visual line.
+        items = [item("World", 16, 5), item("Hello", 12, 4)]
+        cells, _ = assign_ocr_to_cells(make_grid(), items)
+        assert cells[1].text == "Hello World"
+        assert cells[1].source_ocr_indices == [1, 0]
+
+    def test_three_tokens_two_lines_ordering(self):
+        items = [item("C", 18, 8), item("A", 12, 2), item("B", 17, 3)]
+        cells, _ = assign_ocr_to_cells(make_grid(), items)
+        # Line 1: A (y2), B (y3) -> x order A, B; line 2: C (y8).
+        assert cells[1].text == "A B C"
+        assert cells[1].source_ocr_indices == [1, 2, 0]
+
+
 class TestAssignment:
     def test_center_point_assignment(self):
         items = [item("A", 5, 5), item("B", 15, 5), item("C", 5, 15), item("D", 15, 15)]
