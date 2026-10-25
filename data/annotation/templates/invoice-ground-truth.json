@@ -1,0 +1,24 @@
+{
+  "_comment": "Invoice ground-truth template. Field names match docs/extraction-spec.md. Use ISO dates (YYYY-MM-DD), decimal strings for money, null for absent fields, [] when no line items.",
+  "id": "<document-id>",
+  "invoice": {
+    "supplier": "<string or null>",
+    "invoice_number": "<string or null>",
+    "invoice_date": "YYYY-MM-DD or null",
+    "currency": "<ISO 4217 code or null>",
+    "line_items": [
+      {
+        "description": "<string>",
+        "quantity": "<decimal string or null>",
+        "unit_price": "<decimal string or null>",
+        "line_total": "<decimal string or null>"
+      }
+    ],
+    "subtotal": "<decimal string or null>",
+    "tax": "<decimal string or null>",
+    "discount": "<decimal string or null>",
+    "total": "<decimal string or null>",
+    "payment_amount": "<decimal string or null>",
+    "change_amount": "<decimal string or null>"
+  }
+}

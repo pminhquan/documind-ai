@@ -25,6 +25,7 @@ dev = [
 documind-ocr = "documind.cli:main"
 documind-extract = "documind.extract_cli:main"
 documind-table = "documind.table_cli:main"
+documind-eval = "documind.evaluation.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

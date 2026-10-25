@@ -1,0 +1,41 @@
+{
+ "id": "sample_receipt",
+ "invoice": {
+  "supplier": "MINI MART EXPRESS",
+  "invoice_number": "00001234",
+  "invoice_date": "2026-10-25",
+  "currency": "USD",
+  "line_items": [
+   {
+    "description": "SOAP",
+    "quantity": "2",
+    "unit_price": "2.50",
+    "line_total": "5.00"
+   },
+   {
+    "description": "MILK 1L",
+    "quantity": "1",
+    "unit_price": "2.50",
+    "line_total": "2.50"
+   },
+   {
+    "description": "BREAD",
+    "quantity": "1",
+    "unit_price": "1.20",
+    "line_total": "1.20"
+   },
+   {
+    "description": "EGGS X12",
+    "quantity": "1",
+    "unit_price": "3.60",
+    "line_total": "3.60"
+   }
+  ],
+  "subtotal": "12.30",
+  "tax": "1.23",
+  "discount": null,
+  "total": "13.53",
+  "payment_amount": "15.00",
+  "change_amount": "1.47"
+ }
+}

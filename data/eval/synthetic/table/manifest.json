@@ -1,0 +1,21 @@
+{
+ "task": "table",
+ "documents": [
+  {
+   "id": "table_products",
+   "prediction": "../../../../outputs/table_products.tables.json",
+   "ground_truth": "ground_truth/table_products.json"
+  },
+  {
+   "id": "table_gaps",
+   "prediction": "../../../../outputs/table_gaps.tables.json",
+   "ground_truth": "ground_truth/table_gaps.json"
+  },
+  {
+   "id": "table_large",
+   "prediction": "../../../../outputs/table_large.tables.json",
+   "ground_truth": "ground_truth/table_large.json"
+  }
+ ],
+ "provenance": "synthetic"
+}

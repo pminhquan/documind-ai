@@ -1,0 +1,36 @@
+{
+ "id": "table_gaps",
+ "tables": [
+  {
+   "image": "assets/samples/table_gaps.png",
+   "rows": 4,
+   "columns": 4,
+   "cells": [
+    [
+     "Code",
+     "Product Name",
+     "Stock",
+     "Note"
+    ],
+    [
+     "A-01",
+     "Red Delicious Apple",
+     "12",
+     ""
+    ],
+    [
+     "B-02",
+     "Whole Milk 1L",
+     "",
+     "chilled section"
+    ],
+    [
+     "C-07",
+     "",
+     "5",
+     "limited edition batch"
+    ]
+   ]
+  }
+ ]
+}

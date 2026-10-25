@@ -1,0 +1,11 @@
+{
+  "_comment": "Evaluation manifest template. Paths resolve relative to this manifest file.",
+  "task": "ocr | invoice | table",
+  "documents": [
+    {
+      "id": "<document-id>",
+      "prediction": "<path to saved prediction JSON>",
+      "ground_truth": "<path to ground-truth JSON>"
+    }
+  ]
+}

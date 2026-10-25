@@ -7,15 +7,18 @@ AI-powered Document Intelligence Platform.
 An Applied AI project focused on extracting structured
 information from receipts, invoices, and document tables.
 
-**Current status (M0 + M1 + M2 + M3A complete):** a minimal, CPU-first OCR
-baseline, deterministic invoice extraction, and ruled-table structure
-recognition. `documind-ocr` runs pretrained PaddleOCR 3.x (PP-OCRv6,
-pinned in `engine.py`) on an image and saves text, confidence, and
-bounding boxes as JSON. `documind-extract` transforms that OCR JSON into
-structured invoice data with regex + layout heuristics. `documind-table`
-detects ruled (visible grid line) tables, reconstructs rows/columns/cells,
-assigns OCR text geometrically, and exports JSON/CSV/XLSX — no LLM, no
-model training, no new neural models. No API, database, or frontend yet.
+**Current status (M0 + M1 + M2 + M3A + M4A complete):** a minimal,
+CPU-first OCR baseline, deterministic invoice extraction, ruled-table
+structure recognition, and a reproducible evaluation framework.
+`documind-ocr` runs pretrained PaddleOCR 3.x (PP-OCRv6, pinned in
+`engine.py`) on an image and saves text, confidence, and bounding boxes
+as JSON. `documind-extract` transforms that OCR JSON into structured
+invoice data with regex + layout heuristics. `documind-table` detects
+ruled (visible grid line) tables, reconstructs rows/columns/cells,
+assigns OCR text geometrically, and exports JSON/CSV/XLSX.
+`documind-eval` measures CER/WER, invoice field accuracy, and table
+agreement against labeled ground truth from saved prediction files —
+no LLM, no model training. No API, database, or frontend yet.
 
 ## Planned Features
 
@@ -185,13 +188,31 @@ Example output (excerpt):
 
 Spec and limitations: [docs/table-recognition-spec.md](docs/table-recognition-spec.md).
 
+### 4. Evaluation — saved predictions vs labeled ground truth
+
+Evaluate saved prediction files against labeled ground truth using a
+manifest (no OCR inference; confidence is never an accuracy metric):
+
+```powershell
+documind-eval --task ocr     --manifest data/eval/synthetic/ocr/manifest.json     --output outputs/eval/ocr
+documind-eval --task invoice --manifest data/eval/synthetic/invoice/manifest.json --output outputs/eval/invoice
+documind-eval --task table   --manifest data/eval/synthetic/table/manifest.json   --output outputs/eval/table
+```
+
+Each run writes `summary.json` + `report.md`. Metrics: CER/WER with
+error examples (OCR), field-level accuracy with null semantics and
+canonical date/money comparison (invoice), structural + cell agreement
+with missed-table penalization (table). Spec:
+[docs/evaluation-spec.md](docs/evaluation-spec.md); annotation guide:
+[docs/dataset-annotation-guide.md](docs/dataset-annotation-guide.md).
+
 ## Tests
 
 ```powershell
 pytest
 ```
 
-**Verified result: 107 passed** (20 M1 + 46 M2 + 41 M3A) — see
+**Verified result: 189 passed** (20 M1 + 46 M2 + 41 M3A + 82 M4A) — see
 Verification below for the exact run. All tests run against **mocked**
 OCR output, synthetic JSON fixtures, or geometry-only synthetic images;
 no real model is loaded or downloaded during tests, so a green suite
@@ -224,12 +245,15 @@ src/documind/        core package
   ocr/                 validation, preprocessing, engine, results (M1)
   extraction/          models, parsing, layout, extractor, validator (M2)
   tables/              geometry, assign, models, exporters, pipeline (M3A)
+  evaluation/          text_metrics, ocr/invoice/table eval, manifest,
+                       report, CLI (M4A)
 tests/               pytest suite + fixtures (synthetic OCR JSONs, table truth)
-scripts/             dev utilities (sample receipt/table generators, evaluation)
+scripts/             dev utilities (sample generators, table evaluation)
 assets/samples/      small synthetic sample documents
-data/                local datasets (ignored)
-docs/                setup, architecture, specs, learning notes
-reports/             evaluation results (m3a-synthetic-evaluation.md)
+data/                annotation templates + synthetic eval ground truth
+                     (raw datasets git-ignored)
+docs/                setup, architecture, specs, annotation guide, notes
+reports/             evaluation results (m3a, m4a baselines)
 .github/workflows/   CI (mocked + geometry-only tests, Python 3.12)
 ```
 
@@ -253,8 +277,10 @@ reports/             evaluation results (m3a-synthetic-evaluation.md)
 
 - ~~**M2:** receipt/invoice field extraction (regex + layout heuristics)~~ ✓
 - ~~**M3A:** ruled table structure recognition (OpenCV geometry)~~ ✓
+- ~~**M4A:** evaluation framework (CER/WER, field accuracy, table
+  agreement)~~ ✓ — real-data evaluation **pending** labeled data
 - **M3B:** borderless table recognition (model-based)
-- **M4:** labeled evaluation dataset + accuracy metrics
+- **M4B:** evaluation on labeled real documents
 - **M5:** API service and frontend
 
 ## Development Approach

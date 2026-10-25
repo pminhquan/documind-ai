@@ -1,0 +1,11 @@
+{
+ "task": "ocr",
+ "documents": [
+  {
+   "id": "sample_receipt",
+   "prediction": "../../../../outputs/sample_receipt.json",
+   "ground_truth": "ground_truth/sample_receipt.json"
+  }
+ ],
+ "provenance": "synthetic"
+}
