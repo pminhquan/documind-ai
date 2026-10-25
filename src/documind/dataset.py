@@ -25,7 +25,13 @@ import re
 import shutil
 from pathlib import Path
 
-from .ocr.validation import SUPPORTED_EXTENSIONS, ValidationError, validate_file
+from .evaluation.manifest import load_manifest
+from .ocr.validation import (
+    DEFAULT_MAX_SIZE_BYTES,
+    SUPPORTED_EXTENSIONS,
+    ValidationError,
+    validate_file,
+)
 
 DEFAULT_ROOT = Path("data/eval/real")
 DATASET_DIRS = ("raw", "anonymized", "ground_truth", "predictions", "reports")
@@ -93,7 +99,10 @@ def add_document(image: str | Path, document_id: str, root: str | Path | None = 
     """Copy an image into ``anonymized/`` under ``document_id``.
 
     Requires the explicit ``confirm_anonymized`` flag: the caller asserts
-    personal data was removed before the copy leaves ``raw/``.
+    personal data was removed before the copy leaves ``raw/``. Document
+    ids are unique regardless of image extension, and the size limit
+    matches the OCR pipeline so onboarding never accepts a file the
+    pipelines would reject.
     """
     if not SAFE_ID_RE.match(document_id):
         raise DatasetError(
@@ -106,13 +115,20 @@ def add_document(image: str | Path, document_id: str, root: str | Path | None = 
             "and docs/dataset-annotation-guide.md)"
         )
     base = dataset_root(root)
+    anonymized_dir = base / "anonymized"
+    for existing in anonymized_dir.iterdir() if anonymized_dir.is_dir() else []:
+        if existing.stem == document_id:
+            raise DatasetError(
+                f"document id already exists: '{existing.name}' — ids are "
+                "unique across image formats"
+            )
     source = Path(image)
     try:
         validate_file(source, extensions=SUPPORTED_EXTENSIONS,
-                      max_size_bytes=50 * 1024 * 1024)
+                      max_size_bytes=DEFAULT_MAX_SIZE_BYTES)
     except ValidationError as exc:
         raise DatasetError(str(exc)) from exc
-    target = base / "anonymized" / f"{document_id}{source.suffix.lower()}"
+    target = anonymized_dir / f"{document_id}{source.suffix.lower()}"
     if target.exists():
         raise DatasetError(f"document already exists: '{target}'")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -138,6 +154,12 @@ def _check_ground_truth(path: Path, issues: list[str]) -> bool:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         issues.append(f"{path.name}: malformed JSON ({exc})")
+        return False
+    if not isinstance(data, dict):
+        issues.append(
+            f"{path.name}: annotation must be a JSON object "
+            f"(got {type(data).__name__})"
+        )
         return False
 
     task = next((t for t in TASKS if path.name.endswith(GT_SUFFIXES[t])), None)
@@ -181,6 +203,13 @@ def _check_ground_truth(path: Path, issues: list[str]) -> bool:
         return False
     ok = True
     for index, table in enumerate(tables):
+        if not isinstance(table, dict):
+            issues.append(
+                f"{path.name}: tables[{index}] must be an object with "
+                "rows/columns/cells"
+            )
+            ok = False
+            continue
         rows, columns = table.get("rows"), table.get("columns")
         cells = table.get("cells")
         if not isinstance(rows, int) or not isinstance(columns, int):
@@ -200,20 +229,23 @@ def _check_ground_truth(path: Path, issues: list[str]) -> bool:
 def validate_dataset(root: str | Path | None = None) -> tuple[bool, list[str]]:
     """Validate structure and annotation completeness.
 
-    Returns ``(ok, lines)``: human-readable lines describing coverage and
-    every error found. ``ok`` is False when at least one error exists.
+    Returns ``(ok, lines)``: human-readable lines describing coverage,
+    every error found, and per-task readiness. ``ok`` is False when at
+    least one error exists. Readiness ("ready to evaluate") means the
+    task has annotated documents AND a valid manifest whose prediction
+    files all exist — it is reported separately from structural validity.
     """
     base = dataset_root(root)
-    lines: list[str] = []
+    lines: list[str] = [f"dataset root: {base}"]
     errors: list[str] = []
 
     for name in DATASET_DIRS:
         if not (base / name).is_dir():
             errors.append(f"missing directory: {base / name}")
     if errors:
-        return False, [f"dataset root: {base}"] + [f"ERROR {e}" for e in errors] + [
-            "run 'documind-dataset init' first"
-        ]
+        lines += [f"ERROR {error}" for error in errors]
+        lines.append("run 'documind-dataset init' first")
+        return False, lines
 
     images = sorted(
         p for p in (base / "anonymized").iterdir()
@@ -221,11 +253,46 @@ def validate_dataset(root: str | Path | None = None) -> tuple[bool, list[str]]:
     )
     lines.append(f"documents in anonymized/: {len(images)}")
 
+    # Manifests: valid ones with all prediction files present mark their
+    # task as ready to evaluate.
+    manifest_status: dict[str, bool] = {}
+    for manifest_path in sorted(base.glob("manifest-*.json")):
+        match = re.fullmatch(r"manifest-(.+)\.json", manifest_path.name)
+        task = match.group(1) if match else None
+        try:
+            manifest = load_manifest(manifest_path)
+        except Exception as exc:
+            errors.append(f"{manifest_path.name}: invalid manifest ({exc})")
+            if task in TASKS:
+                manifest_status[task] = False
+            continue
+        missing_predictions = [
+            entry.prediction.name for entry in manifest.entries
+            if not entry.prediction.is_file()
+        ]
+        if missing_predictions:
+            errors.append(
+                f"{manifest_path.name}: prediction file(s) missing "
+                f"({', '.join(missing_predictions)}) — run 'documind-dataset "
+                "predict' to generate them"
+            )
+            if task in TASKS:
+                manifest_status[task] = False
+            continue
+        lines.append(
+            f"  {manifest_path.name}: valid ({len(manifest.entries)} entries, "
+            f"provenance {manifest.provenance})"
+        )
+        if task in TASKS:
+            manifest_status[task] = True
+
+    annotated_counts: dict[str, int] = {}
     for task in TASKS:
         annotated = [
             image for image in images
             if (base / "ground_truth" / f"{image.stem}{GT_SUFFIXES[task]}").exists()
         ]
+        annotated_counts[task] = len(annotated)
         lines.append(f"  {task}: {len(annotated)}/{len(images)} annotated")
 
     for image in images:
@@ -234,16 +301,18 @@ def validate_dataset(root: str | Path | None = None) -> tuple[bool, list[str]]:
             if gt_path.exists():
                 _check_ground_truth(gt_path, errors)
 
-    for manifest_path in sorted(base.glob("manifest-*.json")):
-        try:
-            from .manifest import load_manifest
-            manifest = load_manifest(manifest_path)
+    lines.append("readiness:")
+    for task in TASKS:
+        count = annotated_counts[task]
+        if count == 0:
+            lines.append(f"  not ready: {task} (no annotated documents)")
+        elif manifest_status.get(task):
+            lines.append(f"  ready to evaluate: {task} ({count} documents)")
+        else:
             lines.append(
-                f"  {manifest_path.name}: valid ({len(manifest.entries)} entries, "
-                f"provenance {manifest.provenance})"
+                f"  not ready: {task} ({count} annotated document(s), no valid "
+                f"manifest — run 'documind-dataset predict --task {task}')"
             )
-        except Exception as exc:  # ManifestError, missing files, JSON errors
-            errors.append(f"{manifest_path.name}: invalid manifest ({exc})")
 
     lines.append(f"issues found: {len(errors)}")
     lines.extend(f"ERROR {error}" for error in errors)

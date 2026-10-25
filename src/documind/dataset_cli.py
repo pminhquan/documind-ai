@@ -62,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _predict_task(task: str, root: str | None) -> int:
+    """Run the local pipelines on annotated documents.
+
+    OCR predictions are regenerated on every run (including the OCR step
+    of invoice prediction) so a modified source image can never silently
+    reuse a stale OCR output. Ground truth files are never touched.
+    """
     base = dataset_root(root)
     document_ids = annotated_document_ids(base, task)
     if not document_ids:
@@ -80,18 +86,15 @@ def _predict_task(task: str, root: str | None) -> int:
             continue
         if task == "ocr":
             output = base / "predictions" / f"{document_id}.ocr.json"
-            argv = [str(image), "-o", str(output), "--compact"]
-            exit_code = ocr_main(argv)
+            exit_code = ocr_main([str(image), "-o", str(output), "--compact"])
         elif task == "table":
             output = base / "predictions" / f"{document_id}.tables.json"
             exit_code = table_main([str(image), "-o", str(output), "--compact"])
-        else:  # invoice: extract runs on a saved OCR prediction
+        else:  # invoice: OCR is regenerated fresh, then extraction runs on it
             ocr_output = base / "predictions" / f"{document_id}.ocr.json"
-            if not ocr_output.exists():
-                exit_code = ocr_main([str(image), "-o", str(ocr_output), "--compact"])
-                if exit_code != 0:
-                    failures.append(f"{document_id}: OCR step failed")
-                    continue
+            if ocr_main([str(image), "-o", str(ocr_output), "--compact"]) != 0:
+                failures.append(f"{document_id}: OCR step failed")
+                continue
             output = base / "predictions" / f"{document_id}.invoice.json"
             exit_code = extract_main([str(ocr_output), "-o", str(output)])
         if exit_code != 0:
