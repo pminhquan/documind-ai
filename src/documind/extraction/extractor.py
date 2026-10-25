@@ -202,25 +202,24 @@ class _Extractor:
             None,
         )
         start = header_index + 1 if header_index is not None else 3
-        pending_description: list[str] = []
+        pending_description: list[tuple[str, OcrToken]] = []
 
         for line in lines[start:]:
             if re.search(SUMMARY_START_RE, line.text):
                 break  # summary zone reached: item region ended
             if not _line_has_amount(line) and not QTY_PRICE_RE.search(line.text):
-                pending_description.append(line.text)
+                pending_description.append((line.text, line.tokens[0]))
                 continue
 
-            item, total_token = _parse_item_line(line, pending_description)
+            item, prov_tokens = _parse_item_line(line, pending_description)
             pending_description.clear()
             if item is None:
                 continue
             index = len(self.invoice.line_items)
             self.invoice.line_items.append(item)
-            if total_token is not None:
-                self._record(f"line_items[{index}].line_total", total_token)
-            if line.tokens:
-                self._record(f"line_items[{index}].description", line.tokens[0])
+            for suffix, token in prov_tokens.items():
+                if token is not None:
+                    self._record(f"line_items[{index}].{suffix}", token)
 
     # -- stage 7: summary amounts ----------------------------------------------
 
@@ -282,9 +281,10 @@ class _Extractor:
 
 
 def _parse_item_line(
-    line: VisualLine, pending_description: list[str]
-) -> tuple[LineItem | None, OcrToken | None]:
-    """Parse one item row into ``(LineItem, line_total_token)``.
+    line: VisualLine,
+    pending_description: list[tuple[str, OcrToken]],
+) -> tuple[LineItem | None, dict[str, OcrToken | None]]:
+    """Parse one item row into ``(LineItem, provenance_tokens)``.
 
     Layout contract: description tokens sit left of the ``qty x price``
     token, and the line total is the rightmost money token. Rows with no
@@ -292,41 +292,72 @@ def _parse_item_line(
     routes them to description continuation). Ambiguous rows (a bare
     trailing amount with no explicit quantity) keep quantity/unit_price
     as ``None`` instead of guessing.
+
+    The provenance map links each extracted value to the OCR region it
+    was actually parsed from: ``description`` points at the first
+    description-continuation region when one exists (multi-line product
+    names), otherwise at the row's leftmost token; ``quantity`` and
+    ``unit_price`` point at the region containing the qty x price
+    pattern; ``line_total`` at the amount region.
     """
     amount_tokens = [token for token in line.tokens if _is_money_token(token)]
+    non_amount_tokens = [token for token in line.tokens if token not in amount_tokens]
     if len(line.tokens) > 1:
-        joined = " ".join(
-            token.text for token in line.tokens if token not in amount_tokens
-        )
+        parts: list[str] = []
+        spans: list[tuple[int, int, OcrToken]] = []
+        offset = 0
+        for token in non_amount_tokens:
+            spans.append((offset, offset + len(token.text), token))
+            parts.append(token.text)
+            offset += len(token.text) + 1
+        joined = " ".join(parts)
     else:
+        only = line.tokens[0] if line.tokens else None
+        spans = [(0, len(line.text), only)] if only is not None else []
         joined = line.text
 
+    def _token_at(position: int) -> OcrToken | None:
+        for start, end, token in spans:
+            if start <= position < end:
+                return token
+        return spans[-1][2] if spans else None
+
     quantity = unit_price = None
-    description_parts = list(pending_description)
+    description_parts: list[str] = [text for text, _ in pending_description]
+    description_token = (
+        pending_description[0][1]
+        if pending_description
+        else (non_amount_tokens[0] if non_amount_tokens else None)
+    )
+
+    prov: dict[str, OcrToken | None] = {
+        "description": description_token,
+        "quantity": None,
+        "unit_price": None,
+        "line_total": None,
+    }
 
     qty_match = QTY_PRICE_RE.search(joined)
     if qty_match:
         quantity = parse_amount(qty_match.group(1))
         unit_price = parse_amount(qty_match.group(2))
+        prov["quantity"] = _token_at(qty_match.start())
+        prov["unit_price"] = _token_at(qty_match.end(2) - 1)
         prefix = joined[: qty_match.start()].strip(" -–")
         if prefix:
             description_parts.append(prefix)
-    else:
-        prefix = " ".join(
-            token.text for token in line.tokens if token not in amount_tokens
-        )
-        if prefix:
-            description_parts.append(prefix)
+    elif non_amount_tokens:
+        description_parts.append(" ".join(token.text for token in non_amount_tokens))
 
     description = " ".join(part for part in description_parts if part).strip()
     if not description and quantity is None and unit_price is None:
-        return None, None
+        return None, prov
 
     item = LineItem(description=description, quantity=quantity, unit_price=unit_price)
-    total_token = None
     if amount_tokens:
         total_token = amount_tokens[-1]
         item.line_total = parse_amount(total_token.text)
+        prov["line_total"] = total_token
     elif qty_match:
         # Merged single-token row like "SOAP 2 x 2.50 5.00": the line
         # total is the rightmost complete money token after the
@@ -336,8 +367,8 @@ def _parse_item_line(
         )
         if tail_matches:
             item.line_total = parse_amount(tail_matches[-1].group(0))
-            total_token = line.tokens[-1]
-    return item, total_token
+            prov["line_total"] = line.tokens[-1]
+    return item, prov
 
 
 def extract(ocr_document: dict, source: str = "") -> ExtractionResult:

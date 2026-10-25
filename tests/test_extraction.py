@@ -178,6 +178,38 @@ class TestValidationSemantics:
         assert invoice.validation_status == STATUS_OK
 
 
+class TestProvenanceCompleteness:
+    """Regression: line items lacked quantity/unit_price provenance, and
+    multi-line description provenance pointed at the wrong region."""
+
+    def test_quantity_and_unit_price_provenance_exist(self):
+        result = extract(load_fixture("normal_receipt.json"))
+        prov = result.provenance
+        # Both values live in the same OCR region ("2 x 2.50").
+        assert prov["line_items[0].quantity"].text == "2 x 2.50"
+        assert prov["line_items[0].unit_price"].text == "2 x 2.50"
+        assert prov["line_items[0].quantity"].ocr_index == \
+            prov["line_items[0].unit_price"].ocr_index
+
+    def test_multiline_description_provenance_points_to_description_region(self):
+        result = extract(load_fixture("multiline_description.json"))
+        prov = result.provenance["line_items[0].description"]
+        # The description text came from the earlier "SOAP LAVENDER" row,
+        # not from the merged qty/price row.
+        assert prov.text == "SOAP LAVENDER"
+
+    def test_total_provenance_comes_from_same_document(self):
+        document = load_fixture("normal_receipt.json")
+        result = extract(document)
+        prov = result.provenance["total"]
+        assert Decimal(prov.text) == result.invoice.total
+        assert prov.text == document["items"][prov.ocr_index]["text"]
+        assert prov.box == [
+            [float(x), float(y)]
+            for x, y in document["items"][prov.ocr_index]["box"]
+        ]
+
+
 class TestMonetaryRegression:
     """Regression: MONEY_TOKEN_RE capped ungrouped integers at 1-3 digits,
     so the re.search fallback extracted only a substring of larger amounts
