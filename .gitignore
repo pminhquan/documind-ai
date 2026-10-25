@@ -1,0 +1,33 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+
+# Datasets and generated files
+data/raw/
+data/processed/
+models/checkpoints/
+outputs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
