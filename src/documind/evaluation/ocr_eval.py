@@ -29,6 +29,14 @@ def evaluate_document(prediction_path: Path, ground_truth_path: Path,
     if not isinstance(prediction, dict) or "full_text" not in prediction:
         raise ValueError(f"OCR prediction needs 'full_text': {prediction_path}")
 
+    reference_norm = normalize_text(
+        str(reference["reference_text"]), casefold=casefold,
+        collapse_whitespace=collapse_whitespace,
+    )
+    hypothesis_norm = normalize_text(
+        str(prediction["full_text"]), casefold=casefold,
+        collapse_whitespace=collapse_whitespace,
+    )
     result: TextMetricResult = error_rate(
         str(reference["reference_text"]), str(prediction["full_text"]),
         unit="chars", casefold=casefold, collapse_whitespace=collapse_whitespace,
@@ -37,19 +45,15 @@ def evaluate_document(prediction_path: Path, ground_truth_path: Path,
         str(reference["reference_text"]), str(prediction["full_text"]),
         unit="words", casefold=casefold, collapse_whitespace=collapse_whitespace,
     )
+    operations = edit_operations(reference_norm, hypothesis_norm)
+    counts = {"substitute": 0, "insert": 0, "delete": 0}
+    for operation in operations:
+        counts[operation["op"]] += 1
     return {
         "cer": result,
         "wer": words,
-        "examples": edit_operations(
-            normalize_text(
-                str(reference["reference_text"]), casefold=casefold,
-                collapse_whitespace=collapse_whitespace,
-            ),
-            normalize_text(
-                str(prediction["full_text"]), casefold=casefold,
-                collapse_whitespace=collapse_whitespace,
-            ),
-        )[:MAX_EXAMPLES],
+        "operation_counts": counts,
+        "examples": operations[:MAX_EXAMPLES],
     }
 
 
@@ -59,6 +63,7 @@ def evaluate_manifest(manifest, *, casefold: bool = True,
     documents = []
     results = []
     word_results = []
+    total_counts = {"substitute": 0, "insert": 0, "delete": 0}
     for entry in manifest.entries:
         outcome = evaluate_document(
             entry.prediction, entry.ground_truth,
@@ -68,6 +73,8 @@ def evaluate_manifest(manifest, *, casefold: bool = True,
         wer: TextMetricResult = outcome["wer"]
         results.append(cer)
         word_results.append(wer)
+        for kind, count in outcome["operation_counts"].items():
+            total_counts[kind] += count
         documents.append({
             "id": entry.id,
             "cer": cer.error_rate,
@@ -76,6 +83,7 @@ def evaluate_manifest(manifest, *, casefold: bool = True,
             "wer": wer.error_rate,
             "wer_edits": wer.edits,
             "wer_reference_length": wer.reference_length,
+            "operation_counts": outcome["operation_counts"],
             "examples": outcome["examples"],
         })
 
@@ -91,6 +99,9 @@ def evaluate_manifest(manifest, *, casefold: bool = True,
             "wer": wer_aggregate["error_rate"],
             "wer_total_edits": wer_aggregate["total_edits"],
             "wer_total_reference_words": wer_aggregate["total_reference_units"],
+            "substitutions": total_counts["substitute"],
+            "insertions": total_counts["insert"],
+            "deletions": total_counts["delete"],
         },
         "conventions": {
             "normalization": "NFKC; casefold and whitespace collapse configurable",

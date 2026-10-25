@@ -21,6 +21,7 @@ Exit codes: `0` success, `2` invalid manifest/files.
 ```jsonc
 {
   "task": "ocr" | "invoice" | "table",
+  "provenance": "synthetic" | "real" | "unknown",   // optional, default "unknown"
   "documents": [
     {"id": "unique-id",           // non-empty, unique
      "prediction": "path.json",   // saved documind prediction
@@ -30,8 +31,16 @@ Exit codes: `0` success, `2` invalid manifest/files.
 ```
 
 Paths resolve **relative to the manifest file's directory**. Validation
-is strict: unknown task, empty `documents`, missing fields, duplicate
-ids, or malformed JSON all fail loudly (`ManifestError`).
+is strict: unknown task, unknown provenance, empty `documents`, missing
+fields, duplicate ids, or malformed JSON all fail loudly
+(`ManifestError`).
+
+**Dataset provenance** is explicit metadata that travels into every
+summary (`dataset.provenance`) and generated report. It defaults to
+`unknown` when unspecified and is **never classified automatically**:
+only the manifest author declares `synthetic` or `real`. Reports render
+a provenance-specific caveat line (unknown → "do not treat these
+numbers as real-world accuracy").
 
 ## Task 1 — OCR (CER / WER)
 
@@ -47,9 +56,11 @@ ids, or malformed JSON all fail loudly (`ManifestError`).
   reference with non-empty hypothesis → `1.0`.
 - **Aggregation**: micro — total edits ÷ total reference units across
   documents; per-document rates reported alongside.
-- **Error examples**: character-level backtrace operations
-  (substitute/insert/delete with reference position), first 5 per
-  document.
+- **Error analysis**: every summary carries per-document and aggregate
+  **operation counts** (substitutions / insertions / deletions) from a
+  Levenshtein backtrace, plus the first 5 character-level operations as
+  examples — so the dominant error source is always reproducible
+  evidence, not narrative.
 
 ## Task 2 — Invoice extraction
 
@@ -70,7 +81,15 @@ ids, or malformed JSON all fail loudly (`ManifestError`).
   summed over documents; **macro** = mean of per-document accuracies.
 - **Line items** are matched **by index** — an explicit assumption that
   reading order is preserved (content-based matching is future work).
-  Item fields use the same rules; missing/extra items counted.
+- Item-level metrics: `item_field_accuracy` measures field correctness
+  **among matched item pairs only**; `item_precision` / `item_recall` /
+  `item_f1` (per document and micro-aggregated) reflect missing items
+  (false negatives) and extra items (false positives), so a prediction
+  that drops items can never report a perfect item-extraction score.
+- Item amount fields (`quantity`, `unit_price`, `line_total`) compare
+  as **Decimals** (scale-insensitive: `2.50 == 2.5`, `2 == 2.0`);
+  unparseable or non-finite values (NaN, Infinity) are invalid and
+  never equal anything.
 
 ## Task 3 — Table recognition
 
@@ -85,7 +104,12 @@ ids, or malformed JSON all fail loudly (`ManifestError`).
   cell-text agreement (whitespace-collapsed, casefolded), non-empty
   cell agreement, empty-cell preservation, missing cells (expected
   content absent in prediction), extra cells (content where the ground
-  truth is empty), incorrect cells (both non-empty, different).
+  truth is empty, **plus** unexpected predicted cells), incorrect cells
+  (both non-empty, different).
+- **Unexpected predicted cells** — coordinates outside the expected
+  shape, duplicate coordinates (first write wins), or non-integer
+  coordinates — are counted in `extra_cells` with a detailed issue
+  entry each; they are never silently overwritten or ignored.
 - Aggregate: sums across documents plus `structure_ok_documents` (a
   document with shape mismatch, missed, or extra tables is not
   structure-ok).

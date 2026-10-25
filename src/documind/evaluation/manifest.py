@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 KNOWN_TASKS = ("ocr", "invoice", "table")
+KNOWN_PROVENANCE = ("synthetic", "real", "unknown")
 
 
 class ManifestError(ValueError):
@@ -38,6 +39,9 @@ class Manifest:
     task: str
     entries: list[ManifestEntry] = field(default_factory=list)
     path: Path | None = None
+    # Explicit dataset provenance; "unknown" unless the manifest declares
+    # otherwise. Nothing is ever classified as real automatically.
+    provenance: str = "unknown"
 
 
 def load_manifest(path: str | Path) -> Manifest:
@@ -54,6 +58,12 @@ def load_manifest(path: str | Path) -> Manifest:
     if task not in KNOWN_TASKS:
         raise ManifestError(
             f"Manifest task must be one of {KNOWN_TASKS}, got {task!r}"
+        )
+    provenance = raw.get("provenance", "unknown")
+    if provenance not in KNOWN_PROVENANCE:
+        raise ManifestError(
+            f"Manifest provenance must be one of {KNOWN_PROVENANCE} "
+            f"(defaults to 'unknown'), got {provenance!r}"
         )
     documents = raw.get("documents")
     if not isinstance(documents, list) or not documents:
@@ -86,7 +96,8 @@ def load_manifest(path: str | Path) -> Manifest:
                 ground_truth=_resolve(manifest_path.parent, ground_truth),
             )
         )
-    return Manifest(task=task, entries=entries, path=manifest_path)
+    return Manifest(task=task, entries=entries, path=manifest_path,
+                    provenance=provenance)
 
 
 def _resolve(base: Path, value: str) -> Path:

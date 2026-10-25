@@ -16,5 +16,6 @@
    "prediction": "../../../../outputs/table_large.tables.json",
    "ground_truth": "ground_truth/table_large.json"
   }
- ]
+ ],
+ "provenance": "synthetic"
 }

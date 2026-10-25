@@ -62,6 +62,9 @@ def run_eval(args: argparse.Namespace) -> int:
         }
 
     summary = EVALUATORS[task](manifest, **kwargs)
+    # Explicit dataset provenance travels with every summary; manifests
+    # default to "unknown" and nothing is classified as real automatically.
+    summary["dataset"] = {"provenance": manifest.provenance}
     output_dir = Path(args.output) if args.output else Path("outputs") / "eval" / task
     output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = output_dir / "summary.json"

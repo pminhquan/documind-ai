@@ -14,13 +14,16 @@ def _fmt(value) -> str:
 def _ocr_report(summary: dict) -> list[str]:
     aggregate = summary["aggregate"]
     lines = [
-        "| Document | CER | WER | CER edits / ref chars |",
-        "|---|---|---|---|",
+        "| Document | CER | WER | Substitutions | Insertions | Deletions "
+        "| CER edits / ref chars |",
+        "|---|---|---|---|---|---|---|",
     ]
     for document in summary["documents"]:
+        counts = document.get("operation_counts", {})
         lines.append(
             f"| {document['id']} | {_fmt(document['cer'])} | "
-            f"{_fmt(document['wer'])} | "
+            f"{_fmt(document['wer'])} | {counts.get('substitute', 0)} | "
+            f"{counts.get('insert', 0)} | {counts.get('delete', 0)} | "
             f"{document['cer_edits']} / {document['cer_reference_length']} |"
         )
     lines += [
@@ -31,6 +34,10 @@ def _ocr_report(summary: dict) -> list[str]:
         f"{aggregate['cer_total_reference_chars']} reference characters; "
         f"{aggregate['wer_total_edits']} word edits over "
         f"{aggregate['wer_total_reference_words']} reference words).",
+        "",
+        f"**Edit mix:** substitutions: {aggregate.get('substitutions', 0)}, "
+        f"insertions: {aggregate.get('insertions', 0)}, "
+        f"deletions: {aggregate.get('deletions', 0)}.",
         "",
         "### Error examples (first per document)",
         "",
@@ -136,6 +143,23 @@ def aggregate_cell_rate(document: dict) -> float | None:
 
 def render_markdown(summary: dict) -> str:
     task = summary["task"]
+    provenance = summary.get("dataset", {}).get("provenance", "unknown")
+    provenance_notes = {
+        "synthetic": (
+            "Dataset provenance: **synthetic** — results demonstrate "
+            "pipeline correctness on clean generated inputs and are not "
+            "real-world accuracy."
+        ),
+        "real": (
+            "Dataset provenance: **real** — results apply to the labeled "
+            "documents in this dataset only; see the dataset's provenance "
+            "notes for scope and collection caveats."
+        ),
+        "unknown": (
+            "Dataset provenance: **unknown** — interpret with caution; do "
+            "not treat these numbers as real-world accuracy."
+        ),
+    }
     conventions = "\n".join(
         f"- **{key.replace('_', ' ')}**: {value}"
         for key, value in summary.get("conventions", {}).items()
@@ -145,7 +169,9 @@ def render_markdown(summary: dict) -> str:
     return "\n".join([
         f"# Evaluation report — task: {task}",
         "",
-        "Synthetic/fixture results only; not real-world accuracy.",
+        f"Dataset provenance: {provenance}",
+        "",
+        provenance_notes.get(provenance, provenance_notes["unknown"]),
         "",
         "## Per-document results",
         "",

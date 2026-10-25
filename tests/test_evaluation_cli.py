@@ -129,6 +129,92 @@ class TestEvalCli:
         assert main(["--manifest", str(manifest)]) == 2
 
 
+class TestProvenance:
+    def test_manifest_defaults_to_unknown(self, tmp_path):
+        path = tmp_path / "manifest.json"
+        path.write_text(json.dumps({
+            "task": "ocr",
+            "documents": [make_ocr_eval_files(tmp_path, "d1", "abc", "abc")],
+        }), encoding="utf-8")
+        assert load_manifest(path).provenance == "unknown"
+
+    def test_declared_provenance_is_kept(self, tmp_path):
+        path = tmp_path / "manifest.json"
+        path.write_text(json.dumps({
+            "task": "ocr",
+            "provenance": "synthetic",
+            "documents": [make_ocr_eval_files(tmp_path, "d1", "abc", "abc")],
+        }), encoding="utf-8")
+        assert load_manifest(path).provenance == "synthetic"
+
+    def test_invalid_provenance_rejected(self, tmp_path):
+        path = tmp_path / "manifest.json"
+        path.write_text(json.dumps({
+            "task": "ocr",
+            "provenance": "definitely-real-trust-me",
+            "documents": [make_ocr_eval_files(tmp_path, "d1", "abc", "abc")],
+        }), encoding="utf-8")
+        with pytest.raises(ManifestError, match="provenance"):
+            load_manifest(path)
+
+    def test_summary_and_report_carry_provenance(self, tmp_path):
+        docs = [make_ocr_eval_files(tmp_path, "d1", "abc", "abd")]
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({
+            "task": "ocr", "provenance": "synthetic", "documents": docs,
+        }), encoding="utf-8")
+        output = tmp_path / "out"
+        assert main(["--manifest", str(manifest), "--output", str(output)]) == 0
+        summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+        assert summary["dataset"]["provenance"] == "synthetic"
+        report = (output / "report.md").read_text(encoding="utf-8")
+        assert "Dataset provenance: synthetic" in report
+
+    def test_unknown_provenance_caveat_in_report(self, tmp_path):
+        docs = [make_ocr_eval_files(tmp_path, "d1", "abc", "abd")]
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"task": "ocr", "documents": docs}),
+                            encoding="utf-8")
+        output = tmp_path / "out"
+        main(["--manifest", str(manifest), "--output", str(output)])
+        report = (output / "report.md").read_text(encoding="utf-8")
+        assert "Dataset provenance: unknown" in report
+        assert "do not treat these numbers as real-world accuracy" in report
+
+
+class TestOperationCounts:
+    """Regression: error analysis needs reproducible operation-type
+    statistics, not just the first five examples."""
+
+    def test_summary_counts_operations(self, tmp_path):
+        docs = [make_ocr_eval_files(tmp_path, "d1", "kitten", "sitten")]
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"task": "ocr", "documents": docs}),
+                            encoding="utf-8")
+        output = tmp_path / "out"
+        main(["--manifest", str(manifest), "--output", str(output)])
+        summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+        doc = summary["documents"][0]
+        # kitten -> sitten: single substitution k -> s
+        assert doc["operation_counts"] == {"substitute": 1, "insert": 0, "delete": 0}
+        assert sum(doc["operation_counts"].values()) == doc["cer_edits"]
+        aggregate = summary["aggregate"]
+        assert aggregate["substitutions"] == 1
+        assert aggregate["insertions"] == 0
+        assert aggregate["deletions"] == 0
+
+    def test_report_shows_operation_mix(self, tmp_path):
+        docs = [make_ocr_eval_files(tmp_path, "d1", "kitten", "sitten")]
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"task": "ocr", "documents": docs}),
+                            encoding="utf-8")
+        output = tmp_path / "out"
+        main(["--manifest", str(manifest), "--output", str(output)])
+        report = (output / "report.md").read_text(encoding="utf-8")
+        assert "Edit mix" in report
+        assert "substitutions: 1" in report
+
+
 class TestReport:
     @staticmethod
     def _invoice_entry(tmp_path: Path, doc_id: str, expected_invoice, predicted_invoice):
