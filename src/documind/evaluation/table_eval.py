@@ -106,7 +106,15 @@ def _compare_table(expected: dict, predicted: dict) -> dict:
 
     total = rows * columns
     extra += unexpected  # unplaceable/duplicate predictions are pure extra
+    # Precision-aware companion to cell_exact_agreement: everything the
+    # predictor emitted but should not have (content on empty expected
+    # cells, out-of-shape, duplicate, invalid) lowers it. None when the
+    # prediction emitted no placeable cells at all.
+    precision_denominator = matched + incorrect + extra
     return {
+        "prediction_precision": (
+            matched / precision_denominator if precision_denominator else None
+        ),
         "structure_ok": structure_ok,
         "expected_shape": [rows, columns],
         "predicted_shape": [predicted.get("rows"), predicted.get("columns")],
@@ -166,6 +174,20 @@ def evaluate_document(prediction_path: Path, ground_truth_path: Path) -> dict:
 
     missed_cell_counts = [_cell_totals(table) for table in expected_tables[pair_count:]]
     extra_cell_counts = [_cell_totals(table) for table in predicted_tables[pair_count:]]
+    missed_cells = sum(count[0] for count in missed_cell_counts)
+    missed_non_empty = sum(count[1] for count in missed_cell_counts)
+    missed_empty = sum(count[2] for count in missed_cell_counts)
+    extra_cells_from_tables = sum(count[0] for count in extra_cell_counts)
+
+    # Document-level strict metrics: expected cells include completely
+    # missed tables, and extra cells include completely extra tables, so
+    # both directions of failure lower the strict agreement.
+    doc_matched = sum(c["cells_matched"] for c in comparisons)
+    doc_incorrect = sum(c["incorrect_cells"] for c in comparisons)
+    doc_extra = sum(c["extra_cells"] for c in comparisons) + extra_cells_from_tables
+    doc_expected = sum(c["cells_total"] for c in comparisons) + missed_cells
+    precision_denominator = doc_matched + doc_incorrect + doc_extra
+    strict_denominator = doc_expected + doc_extra
 
     return {
         "tables_expected": len(expected_tables),
@@ -173,10 +195,25 @@ def evaluate_document(prediction_path: Path, ground_truth_path: Path) -> dict:
         "tables_matched_pairs": pair_count,
         "tables_missed": missed,
         "tables_extra": extra,
-        "missed_tables_cells": sum(count[0] for count in missed_cell_counts),
-        "missed_tables_non_empty_cells": sum(count[1] for count in missed_cell_counts),
-        "missed_tables_empty_cells": sum(count[2] for count in missed_cell_counts),
-        "extra_tables_cells": sum(count[0] for count in extra_cell_counts),
+        "document_metrics": {
+            "cells_matched": doc_matched,
+            "cells_expected": doc_expected,
+            "extra_cells_total": doc_extra,
+            "incorrect_cells": doc_incorrect,
+            "missing_cells": sum(c["missing_cells"] for c in comparisons)
+            + missed_cells,
+            "prediction_precision": (
+                doc_matched / precision_denominator
+                if precision_denominator else None
+            ),
+            "strict_cell_agreement": (
+                doc_matched / strict_denominator if strict_denominator else None
+            ),
+        },
+        "missed_tables_cells": missed_cells,
+        "missed_tables_non_empty_cells": missed_non_empty,
+        "missed_tables_empty_cells": missed_empty,
+        "extra_tables_cells": extra_cells_from_tables,
         "comparisons": comparisons,
     }
 
@@ -198,20 +235,30 @@ def evaluate_manifest(manifest) -> dict:
         for key in ("tables_expected", "tables_predicted", "tables_matched_pairs",
                     "tables_missed", "tables_extra"):
             totals[key] += outcome[key]
-        # Cells of missed/extra tables count toward the document totals so
-        # a completely missed table never scores as perfect.
-        totals["cells_total"] += outcome["missed_tables_cells"]
-        totals["missing_cells"] += outcome["missed_tables_cells"]
-        totals["non_empty_cells_total"] += outcome["missed_tables_non_empty_cells"]
-        totals["empty_cells_total"] += outcome["missed_tables_empty_cells"]
-        totals["extra_cells"] += outcome["extra_tables_cells"]
+        # Document metrics already fold missed/extra table cells in, so
+        # summing them cannot double-count.
+        doc_metrics = outcome["document_metrics"]
+        totals["cells_total"] += doc_metrics["cells_expected"]
+        totals["cells_matched"] += doc_metrics["cells_matched"]
+        totals["extra_cells"] += doc_metrics["extra_cells_total"]
+        totals["incorrect_cells"] += doc_metrics["incorrect_cells"]
+        totals["missing_cells"] += doc_metrics["missing_cells"]
+        totals["non_empty_cells_total"] += (
+            sum(c["non_empty_cells_total"] for c in outcome["comparisons"])
+            + outcome["missed_tables_non_empty_cells"]
+        )
+        totals["non_empty_cells_matched"] += sum(
+            c["non_empty_cells_matched"] for c in outcome["comparisons"]
+        )
+        totals["empty_cells_total"] += (
+            sum(c["empty_cells_total"] for c in outcome["comparisons"])
+            + outcome["missed_tables_empty_cells"]
+        )
+        totals["empty_cells_preserved"] += sum(
+            c["empty_cells_preserved"] for c in outcome["comparisons"]
+        )
         doc_structure_ok = True
         for comparison in outcome["comparisons"]:
-            for key in ("cells_total", "cells_matched", "non_empty_cells_total",
-                        "non_empty_cells_matched", "empty_cells_total",
-                        "empty_cells_preserved", "missing_cells", "extra_cells",
-                        "incorrect_cells"):
-                totals[key] += comparison[key]
             if not comparison["structure_ok"]:
                 doc_structure_ok = False
         # A missed table means structure cannot be considered correct.
@@ -237,6 +284,21 @@ def evaluate_manifest(manifest) -> dict:
             "empty_cell_preservation": (
                 totals["empty_cells_preserved"] / totals["empty_cells_total"]
                 if totals["empty_cells_total"] else None
+            ),
+            # Strict companion metrics: precision penalizes everything the
+            # predictor emitted but should not have; strict agreement also
+            # puts extra predictions in the denominator.
+            "prediction_precision": (
+                totals["cells_matched"]
+                / (totals["cells_matched"] + totals["incorrect_cells"]
+                   + totals["extra_cells"])
+                if totals["cells_matched"] + totals["incorrect_cells"]
+                + totals["extra_cells"] else None
+            ),
+            "strict_cell_agreement": (
+                totals["cells_matched"]
+                / (totals["cells_total"] + totals["extra_cells"])
+                if totals["cells_total"] + totals["extra_cells"] else None
             ),
         },
         "conventions": {

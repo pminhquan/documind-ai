@@ -404,6 +404,84 @@ class TestTableEvaluation:
         assert comparison["missing_cells"] == 3
         assert comparison["cell_exact_agreement"] == 0.25
 
+    def test_strict_metrics_hand_computed(self, tmp_path):
+        """Regression: cell_exact_agreement ignores extra predictions by
+        design (denominator = expected reference cells); the strict
+        metrics must penalize them.
+
+        Expected 1x1 ['A']; predicted cells: 'A' + outside + duplicate
+        + invalid -> matched=1, extra=3, cells_total=1.
+        - prediction_precision = 1 / (1 matched + 0 incorrect + 3 extra) = 0.25
+        - strict_cell_agreement = 1 / (1 expected + 3 extra) = 0.25
+        - cell_exact_agreement stays 1/1 = 1.0 (documented denominator)
+        """
+        predicted_table = {
+            "table_id": "table_0", "rows": 1, "columns": 1,
+            "cells": [
+                {"row_index": 0, "column_index": 0, "text": "A"},
+                {"row_index": 5, "column_index": 0, "text": "OUTSIDE"},
+                {"row_index": 0, "column_index": 0, "text": "DUPLICATE"},
+                {"row_index": "x", "column_index": 0, "text": "INVALID"},
+            ],
+        }
+        summary = self.eval_one(tmp_path, "doc", [self.truth(1, 1, [["A"]])],
+                                [predicted_table])
+        comparison = summary["documents"][0]["comparisons"][0]
+        assert comparison["prediction_precision"] == 0.25
+        metrics = summary["documents"][0]["document_metrics"]
+        # strict agreement is document-level: matched / (expected + extra)
+        assert metrics["strict_cell_agreement"] == 0.25
+        assert metrics["prediction_precision"] == 0.25
+        assert comparison["cell_exact_agreement"] == 1.0
+        assert summary["aggregate"]["prediction_precision"] == 0.25
+        assert summary["aggregate"]["strict_cell_agreement"] == 0.25
+        # unchanged legacy metric
+        assert summary["aggregate"]["cell_exact_agreement"] == 1.0
+
+    def test_extra_table_penalized_on_strict_metrics(self, tmp_path):
+        cells = [["A", "B"], ["C", "D"]]
+        summary = self.eval_one(tmp_path, "doc", [self.truth(2, 2, cells)],
+                                [self.pred_table(2, 2, cells),
+                                 self.pred_table(2, 2, cells, index=1)])
+        doc = summary["documents"][0]
+        assert doc["document_metrics"]["prediction_precision"] == pytest.approx(4 / 8)
+        # strict = matched / (expected 4 + extra-table cells 4) = 0.5
+        assert doc["document_metrics"]["strict_cell_agreement"] == pytest.approx(0.5)
+        # Legacy metric keeps its documented denominator (expected
+        # reference cells only); extra tables are penalized by the strict
+        # metrics and structure_ok_documents instead.
+        assert summary["aggregate"]["cell_exact_agreement"] == 1.0
+        assert summary["aggregate"]["structure_ok_documents"] == 0
+
+    def test_missed_table_penalized_on_strict_recall(self, tmp_path):
+        cells = [["A", "B"], ["C", "D"]]
+        summary = self.eval_one(tmp_path, "doc",
+                                [self.truth(2, 2, cells), self.truth(2, 2, cells)],
+                                [self.pred_table(2, 2, cells)])
+        metrics = summary["documents"][0]["document_metrics"]
+        assert metrics["prediction_precision"] == 1.0  # nothing extra predicted
+        assert metrics["strict_cell_agreement"] == pytest.approx(4 / 8)
+
+    def test_perfect_table_strict_metrics_are_one(self, tmp_path):
+        cells = [["Item", "Qty"], ["Coffee", ""]]
+        summary = self.eval_one(tmp_path, "doc", [self.truth(2, 2, cells)],
+                                [self.pred_table(2, 2, cells)])
+        metrics = summary["documents"][0]["document_metrics"]
+        assert metrics["prediction_precision"] == 1.0
+        assert metrics["strict_cell_agreement"] == 1.0
+
+    def test_no_double_counting_of_missed_and_extra_cells(self, tmp_path):
+        # 1 expected table predicted perfectly + 1 table missed
+        # (4 cells missing) + nothing extra:
+        # missing_cells must be exactly 4, extra_cells exactly 0.
+        cells = [["A", "B"], ["C", "D"]]
+        summary = self.eval_one(tmp_path, "doc",
+                                [self.truth(2, 2, cells), self.truth(2, 2, cells)],
+                                [self.pred_table(2, 2, cells)])
+        aggregate = summary["aggregate"]
+        assert aggregate["missing_cells"] == 4
+        assert aggregate["extra_cells"] == 0
+
     def test_normalization_casefold_and_whitespace(self, tmp_path):
         cells = [["Red  Delicious Apple", "12"]]
         predicted = [["red delicious apple", "12"]]

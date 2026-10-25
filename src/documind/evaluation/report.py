@@ -58,9 +58,9 @@ def _ocr_report(summary: dict) -> list[str]:
 def _invoice_report(summary: dict) -> list[str]:
     aggregate = summary["aggregate"]
     lines = [
-        "| Document | Field accuracy | Matched | Missing | Extra | Incorrect | "
-        "Items matched (expected/predicted) |",
-        "|---|---|---|---|---|---|---|",
+        "| Document | Field accuracy | Matched | Missing | Extra | Incorrect "
+        "| Item P | Item R | Item F1 | Items matched (expected/predicted) |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for document in summary["documents"]:
         doc_summary = document["summary"]
@@ -69,6 +69,9 @@ def _invoice_report(summary: dict) -> list[str]:
             f"| {document['id']} | {_fmt(doc_summary['accuracy'])} | "
             f"{doc_summary['matched']} | {doc_summary['missing']} | "
             f"{doc_summary['extra']} | {doc_summary['incorrect']} | "
+            f"{_fmt(line_items.get('item_precision'))} | "
+            f"{_fmt(line_items.get('item_recall'))} | "
+            f"{_fmt(line_items.get('item_f1'))} | "
             f"{line_items['items_matched']} "
             f"({line_items['expected_items']}/{line_items['predicted_items']}) |"
         )
@@ -90,8 +93,11 @@ def _invoice_report(summary: dict) -> list[str]:
         f"**Micro field accuracy:** {_fmt(aggregate['micro_field_accuracy'])} "
         f"({aggregate['fields_matched']}/{aggregate['fields_applicable']}); "
         f"**macro:** {_fmt(aggregate['macro_field_accuracy'])}; "
-        f"item field accuracy: {_fmt(aggregate['item_field_accuracy'])} "
+        f"item field accuracy (matched pairs): "
+        f"{_fmt(aggregate['item_field_accuracy'])} "
         f"({aggregate['item_field_correct']}/{aggregate['item_field_total']}); "
+        f"item precision {_fmt(aggregate['item_precision'])} / recall "
+        f"{_fmt(aggregate['item_recall'])} / F1 {_fmt(aggregate['item_f1'])}; "
         f"missing line items {aggregate['missing_line_items']}, "
         f"extra line items {aggregate['extra_line_items']}.",
         "",
@@ -103,24 +109,29 @@ def _invoice_report(summary: dict) -> list[str]:
 def _table_report(summary: dict) -> list[str]:
     aggregate = summary["aggregate"]
     lines = [
-        "| Document | Expected | Predicted | Missed | Extra | Structure OK | "
-        "Cells matched | Exact agreement |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Document | Expected | Predicted | Missed | Extra | Structure OK "
+        "| Cells matched | Exact agreement | Prediction precision | Strict agreement |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for document in summary["documents"]:
+        metrics = document["document_metrics"]
         lines.append(
             f"| {document['id']} | {document['tables_expected']} | "
             f"{document['tables_predicted']} | {document['tables_missed']} | "
             f"{document['tables_extra']} | "
-            f"{'yes' if all(c['structure_ok'] for c in document['comparisons']) and document['tables_missed'] == 0 else 'no'} | "
-            f"{sum(c['cells_matched'] for c in document['comparisons'])} / "
-            f"{sum(c['cells_total'] for c in document['comparisons'])} | "
-            f"{_fmt(aggregate_cell_rate(document))} |"
+            f"{'yes' if all(c['structure_ok'] for c in document['comparisons']) and document['tables_missed'] == 0 and document['tables_extra'] == 0 else 'no'} | "
+            f"{metrics['cells_matched']} / {metrics['cells_expected']} | "
+            f"{_fmt(aggregate_cell_rate(document))} | "
+            f"{_fmt(metrics['prediction_precision'])} | "
+            f"{_fmt(metrics['strict_cell_agreement'])} |"
         )
     lines += [
         "",
         f"**Aggregate:** cell exact agreement {_fmt(aggregate['cell_exact_agreement'])} "
-        f"({aggregate['cells_matched']}/{aggregate['cells_total']}); "
+        f"({aggregate['cells_matched']}/{aggregate['cells_total']} expected "
+        f"reference cells — extra predictions do not enter this denominator); "
+        f"**prediction precision** {_fmt(aggregate['prediction_precision'])}; "
+        f"**strict cell agreement** {_fmt(aggregate['strict_cell_agreement'])}; "
         f"non-empty agreement {_fmt(aggregate['non_empty_agreement'])}; "
         f"empty-cell preservation {_fmt(aggregate['empty_cell_preservation'])}; "
         f"tables expected {aggregate['tables_expected']}, predicted "
@@ -129,15 +140,16 @@ def _table_report(summary: dict) -> list[str]:
         f"{aggregate['structure_ok_documents']}/{len(summary['documents'])}.",
         "",
         f"Missing cells {aggregate['missing_cells']}, extra cells "
-        f"{aggregate['extra_cells']}, incorrect cells "
+        f"{aggregate['extra_cells']} (including out-of-shape, duplicate, and "
+        f"invalid-coordinate predictions), incorrect cells "
         f"{aggregate['incorrect_cells']}.",
     ]
     return lines
 
 
 def aggregate_cell_rate(document: dict) -> float | None:
-    total = sum(c["cells_total"] for c in document["comparisons"])
-    matched = sum(c["cells_matched"] for c in document["comparisons"])
+    total = document["document_metrics"]["cells_expected"]
+    matched = document["document_metrics"]["cells_matched"]
     return (matched / total) if total else None
 
 

@@ -212,7 +212,7 @@ with missed-table penalization (table). Spec:
 pytest
 ```
 
-**Verified result: 181 passed** (20 M1 + 46 M2 + 41 M3A + 74 M4A) — see
+**Verified result: 189 passed** (20 M1 + 46 M2 + 41 M3A + 82 M4A) — see
 Verification below for the exact run. All tests run against **mocked**
 OCR output, synthetic JSON fixtures, or geometry-only synthetic images;
 no real model is loaded or downloaded during tests, so a green suite

@@ -81,11 +81,20 @@ numbers as real-world accuracy").
   summed over documents; **macro** = mean of per-document accuracies.
 - **Line items** are matched **by index** — an explicit assumption that
   reading order is preserved (content-based matching is future work).
-- Item-level metrics: `item_field_accuracy` measures field correctness
-  **among matched item pairs only**; `item_precision` / `item_recall` /
-  `item_f1` (per document and micro-aggregated) reflect missing items
-  (false negatives) and extra items (false positives), so a prediction
-  that drops items can never report a perfect item-extraction score.
+- Item-level metrics use **strict item matching**: an exactly correct
+  matched item is one true positive; an incorrectly predicted matched
+  item is **one false positive and one false negative**; missing items
+  are false negatives; extra items are false positives.
+  `item_precision` / `item_recall` / `item_f1` (per document and
+  micro-aggregated) therefore penalize wrong, missing, and extra items
+  alike — a prediction that drops or mangles items can never report a
+  perfect item score.
+- `item_field_accuracy` separately measures field correctness **among
+  matched item pairs only** (documented scope).
+- Zero-denominator conventions: precision is `None` when the prediction
+  contains no items; recall is `None` when the ground truth contains no
+  items; F1 is `None` when either is `None`, and `0.0` when both are
+  defined and sum to zero.
 - Item amount fields (`quantity`, `unit_price`, `line_total`) compare
   as **Decimals** (scale-insensitive: `2.50 == 2.5`, `2 == 2.0`);
   unparseable or non-finite values (NaN, Infinity) are invalid and
@@ -113,6 +122,18 @@ numbers as real-world accuracy").
 - Aggregate: sums across documents plus `structure_ok_documents` (a
   document with shape mismatch, missed, or extra tables is not
   structure-ok).
+- **Strict companion metrics** (per comparison, per document, and
+  aggregated):
+  - `prediction_precision` = matched ÷ (matched + incorrect + extra) —
+    everything the predictor emitted but should not have (content on
+    empty expected cells, out-of-shape, duplicate, invalid) lowers it.
+  - `strict_cell_agreement` = matched ÷ (expected cells + extra) —
+    expected cells include completely missed tables, and extra includes
+    completely extra tables, so both failure directions lower it.
+- **`cell_exact_agreement` (legacy, unchanged)** = matched ÷ expected
+  reference cells only. Extra predictions and extra tables do **not**
+  enter this denominator by design; consumers who need extra
+  predictions penalized must read the strict metrics instead.
 
 ## Dataset conventions
 

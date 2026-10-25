@@ -53,22 +53,32 @@ separators are the sole cause.
 |---|---|
 | Micro field accuracy | **1.0** (9/9 applicable scalar fields) |
 | Macro field accuracy | **1.0** |
-| Item field accuracy | **1.0** (16/16 across 4 matched line items) |
-| Item precision / recall / F1 | **1.0 / 1.0 / 1.0** (4 expected, 4 predicted, index-matched) |
+| Item field accuracy (matched pairs) | **1.0** (16/16 across 4 matched line items) |
+| Item precision / recall / F1 (strict) | **1.0 / 1.0 / 1.0** (4 expected, 4 predicted, index-matched) |
 | Missing / extra line items | 0 / 0 |
 
 `discount` is `null` on both sides → counted as a true negative and
-excluded from the denominator, per the documented null semantics.
+excluded from the denominator, per the documented null semantics. Under
+strict item matching an incorrect matched item would count as one FP
+and one FN, so these 1.0s reflect a genuinely perfect prediction.
 
 ### Table recognition — 3 synthetic tables
 
 | Metric | Value |
 |---|---|
 | Tables detected | **3/3** (0 missed, 0 extra) |
-| Cell exact agreement | **1.0** (62/62 cells) |
+| Cell exact agreement (legacy) | **1.0** (62/62 expected reference cells) |
+| Prediction precision (strict) | **1.0** |
+| Strict cell agreement | **1.0** |
 | Non-empty agreement | **1.0** (59/59) |
 | Empty-cell preservation | **1.0** (3/3) |
 | Structure-OK documents | 3/3 |
+
+The synthetic predictions contain no unexpected cells, so the legacy and
+strict metrics coincide here; they diverge as soon as extra, duplicate,
+or out-of-shape predictions appear (see the hand-computed regression
+tests, e.g. 1 correct cell + 3 unexpected predictions score exact
+agreement 1.0 but precision/strict 0.25).
 
 ## Metric correctness checks
 
