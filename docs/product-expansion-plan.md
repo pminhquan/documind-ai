@@ -14,8 +14,9 @@ prefer completing PR B (web app) correctly over partially doing B–E.
 - [x] Phase 0 — repository audit and baseline (main @ 7e7621f post PR #5, 223 tests green)
 - [x] Phase 1 / PR A — quality foundations + agent skills (this PR)
 - [x] Phase 2 / PR B — M5A: local FastAPI backend + web frontend
-- [ ] Phase 3 / PR C — M5B: PDF input, batch processing, richer exports
-- [ ] Phase 4 / PR D — M5C: extraction robustness + Vietnamese labels/i18n
+- [x] Phase 3 / PR C — M5B: PDF input, batch processing, richer exports
+- [ ] Phase 4 / PR D — M5C: extraction robustness + Vietnamese labels/i18n (pending)
+- [ ] Phase 5 / PR E — performance profiling + release polish (pending)
 - [ ] Phase 5 / PR E — performance profiling + release polish
 
 ## PR A — Quality foundations (done)

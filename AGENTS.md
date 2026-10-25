@@ -56,6 +56,19 @@ weights. Anything needing real inference runs locally only.
 - Local-only binding for any server component; no deployment without
   explicit authorization.
 
+### Web/API rules
+
+- Endpoints must validate uploads at the boundary (size, extension,
+  decoded content, image dimensions) and return stable 4xx messages —
+  never leak tracebacks or OCR text.
+- Inference is serialized on the shared engine lock; never build a
+  second engine for the same request; reuse OCR items across workflows.
+- Exports materialize human corrections into fresh copies; machine
+  output is never mutated; formula-injection and filename sanitization
+  policies are mandatory and tested by read-back.
+- Keep the app local-only (127.0.0.1, no CORS, no auth changes) and the
+  frontend a no-build vanilla JS/HTML/CSS static bundle.
+
 ## Evaluation metric rules
 
 - Metric definitions (denominators, null semantics, strict matching)
