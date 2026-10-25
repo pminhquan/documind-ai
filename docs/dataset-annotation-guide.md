@@ -1,7 +1,45 @@
-# Dataset Annotation Guide (M4A)
+# Dataset Annotation Guide (M4A/M4B)
 
 How to create labeled ground truth for the three DocuMind evaluation
 tasks, and the rules that keep datasets legal, private, and reusable.
+
+## Real-document onboarding workflow (M4B)
+
+The `documind-dataset` CLI automates the local dataset lifecycle. The
+default root is `data/eval/real/` and **the whole directory is
+git-ignored** — nothing from a real dataset is committed by default.
+
+```powershell
+# 1. One-time layout (raw/, anonymized/, ground_truth/, predictions/, reports/)
+documind-dataset init
+
+# 2. Copy your anonymized image into the dataset (explicit confirmation
+#    required — you assert personal data was removed):
+documind-dataset add path\to\anonymized-receipt.jpg --id receipt-001 --confirm-anonymized
+
+# 3. Annotate by hand (templates in data/annotation/templates/):
+#    data/eval/real/ground_truth/receipt-001.ocr.json
+#    data/eval/real/ground_truth/receipt-001.invoice.json
+#    data/eval/real/ground_truth/receipt-001.table.json
+
+# 4. Check structure + annotation completeness (placeholders, required
+#    keys, table matrix shapes, manifest validity):
+documind-dataset validate
+
+# 5. Run the existing pipelines on annotated documents (local venv;
+#    runs PaddleOCR — never in CI):
+documind-dataset predict --task ocr
+documind-dataset predict --task invoice   # reuses saved OCR predictions
+documind-dataset predict --task table
+# each step writes manifest-<task>.json (provenance: real)
+
+# 6. Evaluate with the existing framework:
+documind-eval --task ocr --manifest data/eval/real/manifest-ocr.json --output outputs/eval/real-ocr
+```
+
+`add` refuses to register a document without `--confirm-anonymized`,
+and `predict` generates predictions only for documents that already
+have ground truth — predictions are never used to create labels.
 
 ## Directory convention
 
@@ -56,12 +94,20 @@ Start from `data/annotation/templates/`:
 
 - **Never commit real personal or financial documents** (receipts,
   invoices with names, card numbers, addresses). Anonymize before use:
-  replace names/numbers with fictional values *in the annotation only*,
-  and keep the real image local.
+  physically redact or replace personal data **in the image itself**
+  (blur/paint over) — cropping filenames is not enough. The `add`
+  command requires `--confirm-anonymized` precisely because the tool
+  cannot verify this for you.
+- Anonymization checklist before `add --confirm-anonymized`:
+  personal names, phone numbers, full addresses, card/account numbers,
+  loyalty IDs, handwritten signatures, and any unique long identifiers.
+  Replacing printed values with fictional ones in the annotation only
+  is **not** sufficient — the image must be redacted too.
 - Only annotate documents you have **permission to use** (your own
   test documents, or openly licensed ones with compatible terms).
 - Record provenance for every real document: source, date obtained,
-  license/consent note. No provenance → do not include.
+  license/consent note. No provenance → do not include. Keep these
+  notes in the dataset `README.md` (local, not committed).
 - Do not upload private documents to third-party labeling services or
   cloud OCR consoles; the project's pipeline runs locally on CPU.
 
