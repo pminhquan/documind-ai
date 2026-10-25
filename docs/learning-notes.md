@@ -23,7 +23,7 @@ interpreter Python cùng các thư viện đã cài cho riêng dự án.
 
 OCR (Optical Character Recognition) — nhận dạng ký tự quang học — biến
 ảnh chữ thành text máy đọc được. Pipeline của DocuMind (dùng
-**PaddleOCR 3.x**, model **PP-OCRv5** trên CPU) gồm các bước:
+**PaddleOCR 3.x**, model **PP-OCRv6** trên CPU) gồm các bước:
 
 1. **Validation** — kiểm tra file tồn tại, đúng định dạng ảnh, không rỗng,
    không quá lớn. Fail sớm → thông báo lỗi rõ ràng, tiết kiệm tính toán.
@@ -32,7 +32,9 @@ OCR (Optical Character Recognition) — nhận dạng ký tự quang học — b
 3. **Text detection** — mạng neural tìm ra *vị trí* các vùng có chữ
    trong ảnh (xuất ra đa giác 4 điểm cho mỗi dòng chữ).
 4. **Text recognition** — với từng vùng chữ, mạng neural thứ hai
-   *đọc* nội dung, trả về chuỗi ký tự và điểm tin cậy (confidence).
+   *đọc* nội dung, trả về chuỗi ký tự và điểm tin cậy (confidence —
+   điểm do model tự chấm, dùng để lọc kết quả yếu; **không phải xác suất
+   hiệu chuẩn**, tức confidence 0.9 không có nghĩa là 90% chắc chắn đúng).
 5. **Normalization** — gộp kết quả thô thành JSON có cấu trúc:
    `text`, `confidence`, `box` cho từng dòng.
 
@@ -73,7 +75,7 @@ Trong kết quả của DocuMind, mỗi dòng có `box` gồm 4 điểm toạ đ
 
 | File | Vai trò |
 |---|---|
-| `src/documind/ocr/engine.py` | **Chạy model**: khởi tạo PaddleOCR 3.x (PP-OCRv5 CPU), gọi `predict()`, bọc lỗi thành `OcrEngineError`. Đây là file "gần AI" nhất. |
+| `src/documind/ocr/engine.py` | **Chạy model**: khởi tạo PaddleOCR 3.x (PP-OCRv6, ghim tường minh, CPU), gọi `predict()`, bọc lỗi thành `OcrEngineError`. Đây là file "gần AI" nhất. |
 | `src/documind/ocr/results.py` | **Chuẩn hoá kết quả** model → `TextBox` (text, confidence, box) và JSON. Xử lý output của AI nhưng không chạy AI. |
 | `src/documind/ocr/preprocessing.py` | Chuẩn bị dữ liệu vào cho model (decode + RGB). |
 | `src/documind/cli.py` | Giao diện dòng lệnh — **không chứa logic AI**, chỉ wiring. |
@@ -84,7 +86,7 @@ Nguyên tắc: logic AI tách khỏi CLI để có thể unit-test bằng **mock
 ## 6. Ba bài tập tự luyện
 
 1. **Vẽ bounding box lên ảnh**: viết script dùng Pillow đọc
-   `outputs/sample_receipt.ocr.json`, vẽ các `box` (hình chữ nhật đỏ)
+   `outputs/sample_receipt.json`, vẽ các `box` (hình chữ nhật đỏ)
    lên ảnh gốc và lưu thành `annotated.png`. Gợi ý: `ImageDraw.rectangle`.
    *Mục tiêu*: hiểu toạ độ pixel và cấu trúc JSON output.
 

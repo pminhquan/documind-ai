@@ -48,7 +48,8 @@ pip install -e ".[dev]"        # paddlepaddle (CPU) + paddleocr + pillow + pytes
 ```
 
 File `requirements.lock.txt` ghi lại đúng các phiên bản đã được kiểm chứng
-trong môi trường phát triển; muốn tái tạo y nguyên:
+trong môi trường phát triển; muốn tái tạo y nguyên (chạy từ thư mục gốc
+của repository — lock file tham chiếu chính project qua `-e .`):
 
 ```powershell
 pip install -r requirements.lock.txt
@@ -66,5 +67,6 @@ pytest
 
 - Bản cài CPU của PaddlePaddle là mặc định trên Windows; **không** cài bản
   GPU/CUDA trừ khi đã xác nhận có card NVIDIA tương thích.
-- Model PP-OCRv5 (detection + recognition) được tải tự động **lần chạy đầu
-  tiên** vào cache của user (`~/.paddleocr`), nằm ngoài repository.
+- Model PP-OCRv6 (detection + recognition, ghim tường minh trong
+  `src/documind/ocr/engine.py`) được tải tự động **lần chạy đầu tiên**
+  vào cache của user (`~/.paddlex/official_models`), nằm ngoài repository.

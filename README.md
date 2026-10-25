@@ -9,8 +9,9 @@ information from receipts, invoices, and document tables.
 
 **Current status (M0 + M1 complete):** a minimal, CPU-first OCR baseline.
 The `documind-ocr` CLI runs pretrained PaddleOCR 3.x (PP-OCRv6 detection +
-recognition) on an image and saves recognized text, confidence scores, and
-bounding boxes as structured JSON. No API, database, or frontend yet.
+recognition, pinned explicitly in `engine.py` for reproducibility) on an
+image and saves recognized text, confidence scores, and bounding boxes as
+structured JSON. No API, database, or frontend yet.
 
 ## Planned Features
 
@@ -47,7 +48,8 @@ python -V     # -> 3.12.10 from .venv
 # 3. Dependencies
 python -m pip install --upgrade pip
 pip install -e ".[dev]"
-# or reproduce the verified environment exactly:
+# or reproduce the verified environment exactly - run from the repo root;
+# the lock file installs the local project (as `-e .`) plus exact pins:
 pip install -r requirements.lock.txt
 ```
 
@@ -95,15 +97,21 @@ Exit codes: `0` success, `2` invalid input (missing/unsupported/empty/oversized)
 pytest
 ```
 
-**Verified result: 20 passed in 0.17s** (unit tests for validation and
-result normalization with mocked inference, plus CLI smoke/help/error-path
-tests and a mocked end-to-end JSON pipeline test).
+**Verified result: 20 passed in 0.17s.** All 20 tests run against
+**mocked** inference output (validation, result normalization, CLI
+help/error paths, and a mocked end-to-end JSON pipeline) — no real model
+is loaded or downloaded during tests.
 
-**Verified end-to-end inference** on `assets/samples/sample_receipt.png`:
-19 text regions recognized; all 15 text lines of the synthetic receipt were
-read correctly with confidences 0.97–0.9999 (output kept locally at
-`outputs/sample_receipt.json`, not committed). No accuracy metrics are
-claimed — that requires labeled ground-truth data (planned for M4).
+**Verified end-to-end smoke test** (single image, real inference) on
+`assets/samples/sample_receipt.png`: 19 text regions recognized; all 15
+text lines of the synthetic receipt were read correctly (output kept
+locally at `outputs/sample_receipt.json`, not committed). This is a
+one-image functional smoke check on a clean synthetic input — it is
+**not** a measured accuracy benchmark. No accuracy metrics are claimed:
+that requires labeled ground-truth data and a defined metric (planned
+for M4). Confidence scores in the output are model self-assessment
+scores useful for filtering low-quality lines; they are **not calibrated
+probabilities**.
 
 ## Project Layout
 
