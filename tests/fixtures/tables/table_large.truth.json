@@ -1,0 +1,49 @@
+{
+ "image": "assets/samples/table_large.png",
+ "rows": 6,
+ "columns": 5,
+ "cells": [
+  [
+   "ID",
+   "Region",
+   "Salesperson",
+   "Units",
+   "Revenue"
+  ],
+  [
+   "R01",
+   "North",
+   "Anna Lisz",
+   "140",
+   "15400.00"
+  ],
+  [
+   "R02",
+   "South",
+   "Ben Trovato",
+   "95",
+   "10450.00"
+  ],
+  [
+   "R03",
+   "East",
+   "Cara Mel",
+   "210",
+   "23100.00"
+  ],
+  [
+   "R04",
+   "West",
+   "Dinh Quan",
+   "60",
+   "6600.00"
+  ],
+  [
+   "R05",
+   "Central",
+   "Eva Luator",
+   "175",
+   "19250.00"
+  ]
+ ]
+}

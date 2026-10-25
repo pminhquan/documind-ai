@@ -7,15 +7,15 @@ AI-powered Document Intelligence Platform.
 An Applied AI project focused on extracting structured
 information from receipts, invoices, and document tables.
 
-**Current status (M0 + M1 + M2 complete):** a minimal, CPU-first OCR
-baseline plus a deterministic, layout-aware invoice extraction stage.
-The `documind-ocr` CLI runs pretrained PaddleOCR 3.x (PP-OCRv6 detection +
-recognition, pinned explicitly in `engine.py` for reproducibility) on an
-image and saves recognized text, confidence scores, and bounding boxes as
-structured JSON. The `documind-extract` CLI transforms that OCR JSON into
-structured invoice data (supplier, date, line items, totals) using regex
-and layout heuristics — no LLM, no model training. No API, database, or
-frontend yet.
+**Current status (M0 + M1 + M2 + M3A complete):** a minimal, CPU-first OCR
+baseline, deterministic invoice extraction, and ruled-table structure
+recognition. `documind-ocr` runs pretrained PaddleOCR 3.x (PP-OCRv6,
+pinned in `engine.py`) on an image and saves text, confidence, and
+bounding boxes as JSON. `documind-extract` transforms that OCR JSON into
+structured invoice data with regex + layout heuristics. `documind-table`
+detects ruled (visible grid line) tables, reconstructs rows/columns/cells,
+assigns OCR text geometrically, and exports JSON/CSV/XLSX — no LLM, no
+model training, no new neural models. No API, database, or frontend yet.
 
 ## Planned Features
 
@@ -29,7 +29,8 @@ frontend yet.
 
 ## Tech Stack
 
-Current: Python 3.12, PaddleOCR 3.x / PaddlePaddle 3.x (CPU), Pillow, pytest.
+Current: Python 3.12, PaddleOCR 3.x / PaddlePaddle 3.x (CPU), OpenCV
+(geometry), Pillow, openpyxl (XLSX), pytest.
 Planned (later milestones): FastAPI, PostgreSQL, Streamlit, Docker.
 
 ## Setup (Windows, Python 3.12)
@@ -143,30 +144,75 @@ Financial values are decimal strings (parsed internally as `Decimal`,
 never float). Absent values are `null` — nothing is fabricated. Field
 rules and arithmetic checks: [docs/extraction-spec.md](docs/extraction-spec.md).
 
+### 3. Tables — ruled grid to JSON/CSV/XLSX
+
+Detect ruled tables (visible grid lines), reconstruct rows/columns/cells,
+assign OCR text geometrically, and export:
+
+```powershell
+# Full pipeline (runs PaddleOCR once)
+documind-table assets/samples/table_products.png -o outputs/table_products.tables.json --csv outputs/table_products.csv --xlsx outputs/table_products.xlsx
+
+# Reuse a saved OCR JSON - geometry + assignment only, no model run
+documind-table assets/samples/table_gaps.png --ocr-json outputs/table_gaps.ocr.json
+```
+
+Default JSON output: `outputs/<stem>.tables.json`. Supported table types:
+complete, axis-aligned ruled grids; one or more tables per image
+(multi-table: CSV gets `_t<i>` suffixes, XLSX gets one sheet per table).
+Exit codes: `0` success (including "no table detected", reported via
+warnings), `2` invalid input, `1` processing error.
+
+Example output (excerpt):
+
+```json
+{
+  "source_image": "assets/samples/table_products.png",
+  "tables": [{
+    "table_id": "table_0", "rows": 4, "columns": 4,
+    "cells": [
+      {"row_index": 0, "column_index": 0, "text": "Item",
+       "bounding_box": [[30, 30], [116, 30], [116, 68], [30, 68]],
+       "source_ocr_indices": [0], "confidence": 0.99},
+      {"row_index": 2, "column_index": 3, "text": "",
+       "bounding_box": ["..."], "source_ocr_indices": [], "confidence": null}
+    ],
+    "warnings": []
+  }],
+  "warnings": []
+}
+```
+
+Spec and limitations: [docs/table-recognition-spec.md](docs/table-recognition-spec.md).
+
 ## Tests
 
 ```powershell
 pytest
 ```
 
-**Verified result: 59 passed** (20 M1 + 39 M2) — see Verification below for
-the exact run. All tests run against **mocked** OCR output and synthetic
-JSON fixtures; no real model is loaded or downloaded during tests, so a
-green suite validates application logic only, **not OCR model accuracy**.
-CI (`.github/workflows/ci.yml`) runs this same mocked suite on every pull
-request with Python 3.12, installing only `pytest` + `pillow` — no
-PaddlePaddle, no model weights, no GPU.
+**Verified result: 107 passed** (20 M1 + 46 M2 + 41 M3A) — see
+Verification below for the exact run. All tests run against **mocked**
+OCR output, synthetic JSON fixtures, or geometry-only synthetic images;
+no real model is loaded or downloaded during tests, so a green suite
+validates application logic only, **not OCR model accuracy**.
+CI (`.github/workflows/ci.yml`) runs this same mocked/geometry-only
+suite on every pull request with Python 3.12, installing only `pytest`,
+`pillow`, `openpyxl`, `opencv-python-headless` — no PaddlePaddle, no
+model weights, no GPU.
 
-**Verified end-to-end smoke test** (single image, real inference) on
-`assets/samples/sample_receipt.png`: 30 text regions recognized from the
-corrected synthetic receipt, followed by extraction of all invoice fields
-with `validation_status: ok` (see Verification below). This is a
-one-image functional smoke check on a clean synthetic input — it is
-**not** a measured accuracy benchmark. No extraction accuracy metrics are
-claimed: that requires labeled ground-truth data and a defined metric
-(planned for M4). Confidence scores in the OCR output are model
-self-assessment scores useful for filtering low-quality lines; they are
-**not calibrated probabilities**.
+**Verified end-to-end smoke tests** (single image, real inference):
+`documind-ocr` on `assets/samples/sample_receipt.png` (30 text regions)
+feeds `documind-extract` (all invoice fields, `validation_status: ok`),
+and `documind-table` on three synthetic ruled tables reaches **62/62
+exact cell-text agreement** with committed ground truth
+([reports/m3a-synthetic-evaluation.md](reports/m3a-synthetic-evaluation.md)).
+These are functional smoke checks on clean synthetic inputs — they are
+**not** real-world accuracy benchmarks. No accuracy metrics are claimed
+for real documents: that requires labeled ground-truth data and a
+defined metric (planned for M4). Confidence scores in the OCR output
+are model self-assessment scores useful for filtering low-quality
+lines; they are **not calibrated probabilities**.
 
 ## Project Layout
 
@@ -174,15 +220,17 @@ self-assessment scores useful for filtering low-quality lines; they are
 src/documind/        core package
   cli.py               documind-ocr entry point
   extract_cli.py       documind-extract entry point
+  table_cli.py         documind-table entry point
   ocr/                 validation, preprocessing, engine, results (M1)
   extraction/          models, parsing, layout, extractor, validator (M2)
-tests/               pytest suite + fixtures/ocr/ synthetic OCR JSONs
-scripts/             dev utilities (sample receipt generator)
+  tables/              geometry, assign, models, exporters, pipeline (M3A)
+tests/               pytest suite + fixtures (synthetic OCR JSONs, table truth)
+scripts/             dev utilities (sample receipt/table generators, evaluation)
 assets/samples/      small synthetic sample documents
 data/                local datasets (ignored)
-docs/                setup, architecture, extraction spec, learning notes
-reports/             future evaluation results
-.github/workflows/   CI (mocked unit tests, Python 3.12)
+docs/                setup, architecture, specs, learning notes
+reports/             evaluation results (m3a-synthetic-evaluation.md)
+.github/workflows/   CI (mocked + geometry-only tests, Python 3.12)
 ```
 
 ## Known Limitations
@@ -195,13 +243,17 @@ reports/             future evaluation results
 - Extraction keywords are English-only (`TOTAL`, `CASH`, ...); strictly
   extractive (never derives a line total from qty × price); single-page,
   single-currency documents.
-- No table structure recognition, database, or API yet.
+- Table recognition needs **complete, axis-aligned ruled grids** —
+  borderless tables (M3B), partial rules, and rotated/skewed tables are
+  not recognized; text outside the grid is reported as warnings.
+- No database or API yet.
 - English OCR model by default (`--lang` passes through to PaddleOCR).
 
 ## Roadmap
 
 - ~~**M2:** receipt/invoice field extraction (regex + layout heuristics)~~ ✓
-- **M3:** table structure recognition
+- ~~**M3A:** ruled table structure recognition (OpenCV geometry)~~ ✓
+- **M3B:** borderless table recognition (model-based)
 - **M4:** labeled evaluation dataset + accuracy metrics
 - **M5:** API service and frontend
 
