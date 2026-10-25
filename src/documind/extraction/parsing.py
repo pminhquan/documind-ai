@@ -30,9 +30,13 @@ DATE_FORMATS = (
 )
 
 # Money-like token used as a fallback for the rightmost amount on a
-# merged text line: requires an explicit 2-decimal fraction so pure
-# integers inside descriptions ("EGGS X12") are never mistaken for money.
-MONEY_TOKEN_RE = re.compile(r"\d{1,3}(?:[.,\s]\d{3})*[.,]\d{2}")
+# merged text line. Ungrouped integer digits are unbounded (1234.56,
+# 12345.67, 1234567,89 all match completely); the lookarounds reject
+# partial matches inside malformed runs like 12.34.56.78 — such tokens
+# yield no candidate instead of a silently reinterpreted value.
+MONEY_TOKEN_RE = re.compile(
+    r"(?<![\d.,])\d+(?:[.,\s]\d{3})*[.,]\d{2}(?![\d.,])"
+)
 
 # quantity x unit_price, e.g. "2 x 2.50" (also accepts "*" and unicode x).
 QTY_PRICE_RE = re.compile(

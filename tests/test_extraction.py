@@ -114,6 +114,62 @@ class TestDateFormats:
         assert extract(document).invoice.invoice_date is None
 
 
+class TestMonetaryRegression:
+    """Regression: MONEY_TOKEN_RE capped ungrouped integers at 1-3 digits,
+    so the re.search fallback extracted only a substring of larger amounts
+    (1234.56 -> 234.56). Amounts must be captured completely or not at all."""
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("1234.56", "1234.56"),
+            ("12345.67", "12345.67"),
+            ("1234567,89", "1234567.89"),
+            ("1,234.56", "1234.56"),
+            ("1.234,56", "1234.56"),
+            ("TOTAL 1234.56", "1234.56"),
+            ("TOTAL 12345.67", "12345.67"),
+        ],
+    )
+    def test_rightmost_amount_finds_complete_value(self, text, expected):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text=text, box=())])
+        assert _rightmost_amount(line) == Decimal(expected)
+
+    def test_rightmost_complete_value_wins_over_earlier_candidate(self):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text="TOTAL 1.50 12345.67", box=())])
+        assert _rightmost_amount(line) == Decimal("12345.67")
+
+    def test_malformed_amount_is_not_silently_reinterpreted(self):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text="TOTAL 12.34.56.78", box=())])
+        assert _rightmost_amount(line) is None
+
+    def test_extracted_total_is_complete_value(self):
+        # Same-row boxes make the OCR regions group into one visual line,
+        # mirroring the real OCR output for a total row.
+        document = {"items": [
+            {"text": "MINI MART", "box": []},
+            {"text": "TOTAL", "box": [[0, 0], [50, 0], [50, 20], [0, 20]]},
+            {"text": "1234.56", "box": [[60, 0], [120, 0], [120, 20], [60, 20]]},
+        ]}
+        assert extract(document).invoice.total == Decimal("1234.56")
+
+    def test_merged_total_cell_is_complete_value(self):
+        document = {"items": [
+            {"text": "MINI MART", "box": []},
+            {"text": "TOTAL 12345.67", "box": []},
+        ]}
+        assert extract(document).invoice.total == Decimal("12345.67")
+
+
 class TestMonetarySeparators:
     @pytest.mark.parametrize(
         "text, expected",

@@ -108,15 +108,20 @@ def _line_has_amount(line: VisualLine) -> bool:
 
 
 def _rightmost_amount(line: VisualLine) -> Decimal | None:
-    """Rightmost money token on the line; regex fallback for merged text."""
+    """Rightmost money token on the line; regex fallback for merged text.
+
+    The fallback takes the LAST complete MONEY_TOKEN_RE match (rightmost
+    in reading order); malformed runs match nothing rather than a
+    substring of a larger amount.
+    """
     for token in reversed(line.tokens):
         if _is_money_token(token):
             amount = parse_amount(token.text)
             if amount is not None:
                 return amount
-    match = re.search(MONEY_TOKEN_RE, _clean_money_text(line.text))
-    if match:
-        return parse_amount(match.group(0))
+    matches = list(re.finditer(MONEY_TOKEN_RE, _clean_money_text(line.text)))
+    if matches:
+        return parse_amount(matches[-1].group(0))
     return None
 
 
@@ -324,10 +329,13 @@ def _parse_item_line(
         item.line_total = parse_amount(total_token.text)
     elif qty_match:
         # Merged single-token row like "SOAP 2 x 2.50 5.00": the line
-        # total is the first money token after the qty x price pattern.
-        tail_match = re.search(MONEY_TOKEN_RE, _clean_money_text(joined[qty_match.end():]))
-        if tail_match:
-            item.line_total = parse_amount(tail_match.group(0))
+        # total is the rightmost complete money token after the
+        # qty x price pattern.
+        tail_matches = list(
+            re.finditer(MONEY_TOKEN_RE, _clean_money_text(joined[qty_match.end():]))
+        )
+        if tail_matches:
+            item.line_total = parse_amount(tail_matches[-1].group(0))
             total_token = line.tokens[-1]
     return item, total_token
 
