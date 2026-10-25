@@ -76,8 +76,12 @@ def main() -> int:
     service.process_unified(RECEIPT, ["ocr", "invoice", "table"])
     unified = time.perf_counter() - t0
     lines.append(f"- Unified auto request (1 OCR call reused): **{unified:.2f}s**")
-    lines += ["", "Engine initializations in this run: 1; OCR inference calls "
-              "for unified: 1 (items reused across workflows).", ""]
+    lines += [
+        "",
+        ("Engine initializations in this run: 1; OCR inference calls "
+         "for unified: 1 (items reused across workflows)."),
+        "",
+    ]
 
     report = "\n".join(lines)
     print(report)
