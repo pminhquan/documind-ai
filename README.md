@@ -7,18 +7,22 @@ AI-powered Document Intelligence Platform.
 An Applied AI project focused on extracting structured
 information from receipts, invoices, and document tables.
 
-**Current status (M0 + M1 + M2 + M3A + M4A complete):** a minimal,
-CPU-first OCR baseline, deterministic invoice extraction, ruled-table
-structure recognition, and a reproducible evaluation framework.
-`documind-ocr` runs pretrained PaddleOCR 3.x (PP-OCRv6, pinned in
-`engine.py`) on an image and saves text, confidence, and bounding boxes
-as JSON. `documind-extract` transforms that OCR JSON into structured
-invoice data with regex + layout heuristics. `documind-table` detects
-ruled (visible grid line) tables, reconstructs rows/columns/cells,
-assigns OCR text geometrically, and exports JSON/CSV/XLSX.
-`documind-eval` measures CER/WER, invoice field accuracy, and table
-agreement against labeled ground truth from saved prediction files —
-no LLM, no model training. No API, database, or frontend yet.
+**Current status (M0 + M1 + M2 + M3A + M4A + M4B Phase 1 complete):** a
+minimal, CPU-first OCR baseline, deterministic invoice extraction,
+ruled-table structure recognition, a reproducible evaluation framework,
+and real-document dataset onboarding tooling. `documind-ocr` runs
+pretrained PaddleOCR 3.x (PP-OCRv6, pinned in `engine.py`) on an image
+and saves text, confidence, and bounding boxes as JSON.
+`documind-extract` transforms that OCR JSON into structured invoice
+data with regex + layout heuristics. `documind-table` detects ruled
+(visible grid line) tables, reconstructs rows/columns/cells, assigns
+OCR text geometrically, and exports JSON/CSV/XLSX. `documind-eval`
+measures CER/WER, invoice field accuracy, and table agreement against
+labeled ground truth from saved prediction files. `documind-dataset`
+onboards local real documents (anonymization-gated), validates
+annotations, and generates predictions. No LLM, no model training, no
+API/database/frontend yet. Real-document metrics: **pending** labeled
+data.
 
 ## Planned Features
 
@@ -206,13 +210,29 @@ with missed-table penalization (table). Spec:
 [docs/evaluation-spec.md](docs/evaluation-spec.md); annotation guide:
 [docs/dataset-annotation-guide.md](docs/dataset-annotation-guide.md).
 
+### 5. Datasets — onboard local real documents (M4B Phase 1)
+
+```powershell
+documind-dataset init
+documind-dataset add path\to\anonymized-receipt.jpg --id receipt-001 --confirm-anonymized
+# annotate ground_truth/receipt-001.<ocr|invoice|table>.json by hand
+documind-dataset validate
+documind-dataset predict --task ocr     # local inference (not CI)
+documind-eval    --task ocr --manifest data/eval/real/manifest-ocr.json
+```
+
+`data/eval/real/` is git-ignored entirely: raw documents, anonymized
+images, predictions, and reports stay local. Ground truth is annotated
+manually — never generated from predictions. Real-document metrics are
+**pending** until authentic, verified labels exist.
+
 ## Tests
 
 ```powershell
 pytest
 ```
 
-**Verified result: 189 passed** (20 M1 + 46 M2 + 41 M3A + 82 M4A) — see
+**Verified result: 209 passed** (20 M1 + 46 M2 + 41 M3A + 102 M4) — see
 Verification below for the exact run. All tests run against **mocked**
 OCR output, synthetic JSON fixtures, or geometry-only synthetic images;
 no real model is loaded or downloaded during tests, so a green suite
@@ -247,6 +267,8 @@ src/documind/        core package
   tables/              geometry, assign, models, exporters, pipeline (M3A)
   evaluation/          text_metrics, ocr/invoice/table eval, manifest,
                        report, CLI (M4A)
+  dataset.py           real-data onboarding/validation (M4B)
+  dataset_cli.py       documind-dataset entry point
 tests/               pytest suite + fixtures (synthetic OCR JSONs, table truth)
 scripts/             dev utilities (sample generators, table evaluation)
 assets/samples/      small synthetic sample documents
@@ -279,8 +301,10 @@ reports/             evaluation results (m3a, m4a baselines)
 - ~~**M3A:** ruled table structure recognition (OpenCV geometry)~~ ✓
 - ~~**M4A:** evaluation framework (CER/WER, field accuracy, table
   agreement)~~ ✓ — real-data evaluation **pending** labeled data
+- ~~**M4B Phase 1:** real-document dataset onboarding tooling~~ ✓ —
+  real-document metrics **pending** authentic annotated data
+- **M4B Phase 2:** evaluate on labeled real documents
 - **M3B:** borderless table recognition (model-based)
-- **M4B:** evaluation on labeled real documents
 - **M5:** API service and frontend
 
 ## Development Approach

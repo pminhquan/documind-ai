@@ -304,6 +304,7 @@ def evaluate_manifest(manifest) -> dict:
     accuracies: list[float] = []
     item_field_correct = item_field_total = 0
     total_tp = total_fp = total_fn = 0
+    total_missing = total_extra = 0
 
     for entry in manifest.entries:
         outcome = evaluate_document(entry.prediction, entry.ground_truth)
@@ -319,6 +320,10 @@ def evaluate_manifest(manifest) -> dict:
         total_tp += line_items["items_matched"]
         total_fp += line_items["false_positives"]
         total_fn += line_items["false_negatives"]
+        # Genuine missing/extra counts exclude incorrect matched pairs
+        # (which contribute to the strict FP/FN counts above).
+        total_missing += line_items["missing_items"]
+        total_extra += line_items["extra_items"]
 
     macro = (sum(accuracies) / len(accuracies)) if accuracies else None
     micro = (total_matched / total_applicable) if total_applicable else None
@@ -335,8 +340,8 @@ def evaluate_manifest(manifest) -> dict:
             ),
             "item_field_correct": item_field_correct,
             "item_field_total": item_field_total,
-            "missing_line_items": total_fn,
-            "extra_line_items": total_fp,
+            "missing_line_items": total_missing,
+            "extra_line_items": total_extra,
             **_prf(total_tp, total_fp, total_fn),
         },
         "conventions": {
