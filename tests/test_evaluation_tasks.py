@@ -264,6 +264,25 @@ class TestItemMetricCorrectness:
         assert line_items["item_recall"] == 0.0
         assert line_items["item_f1"] == 0.0
 
+    def test_aggregate_missing_extra_exclude_incorrect_pairs(self, tmp_path):
+        """Regression: aggregate missing_line_items/extra_line_items used
+        the strict FP/FN counts, which also include incorrect matched
+        pairs. They must report genuinely missing/extra items only;
+        strict FP/FN remain visible through precision/recall/F1."""
+        predicted = self.predicted_items([
+            FULL_INVOICE["line_items"][0],
+            {"description": "MILK 2L", "quantity": "1", "unit_price": "2.50",
+             "line_total": "2.50"},
+        ])
+        entry = invoice_entry(tmp_path, "doc", FULL_INVOICE, predicted)
+        aggregate = eval_invoices(type("M", (), {"entries": [entry]})())["aggregate"]
+        assert aggregate["missing_line_items"] == 0
+        assert aggregate["extra_line_items"] == 0
+        # strict accounting still reflects the incorrect pair
+        assert aggregate["item_precision"] == 0.5
+        assert aggregate["item_recall"] == 0.5
+        assert aggregate["item_f1"] == 0.5
+
     def test_micro_aggregation_counts_incorrect_pairs(self, tmp_path):
         # doc1: one correct + one incorrect (TP=1, FP=1, FN=1)
         # doc2: one correct  (TP=1)
