@@ -7,11 +7,15 @@ AI-powered Document Intelligence Platform.
 An Applied AI project focused on extracting structured
 information from receipts, invoices, and document tables.
 
-**Current status (M0 + M1 complete):** a minimal, CPU-first OCR baseline.
+**Current status (M0 + M1 + M2 complete):** a minimal, CPU-first OCR
+baseline plus a deterministic, layout-aware invoice extraction stage.
 The `documind-ocr` CLI runs pretrained PaddleOCR 3.x (PP-OCRv6 detection +
 recognition, pinned explicitly in `engine.py` for reproducibility) on an
 image and saves recognized text, confidence scores, and bounding boxes as
-structured JSON. No API, database, or frontend yet.
+structured JSON. The `documind-extract` CLI transforms that OCR JSON into
+structured invoice data (supplier, date, line items, totals) using regex
+and layout heuristics — no LLM, no model training. No API, database, or
+frontend yet.
 
 ## Planned Features
 
@@ -59,6 +63,8 @@ Verified versions in the development environment: `paddlepaddle 3.3.1`,
 
 ## Usage
 
+### 1. OCR — image to text JSON
+
 Run OCR on an image and save JSON (default output: `outputs/<stem>.json`):
 
 ```powershell
@@ -84,12 +90,58 @@ Example output (excerpt):
       "box": [[36.0, 360.0], [129.0, 360.0], [129.0, 388.0], [36.0, 388.0]]
     }
   ],
-  "full_text": "MINI MART EXPRESS\n...\nTOTAL\n8.70\n..."
+  "full_text": "MINI MART EXPRESS\n...\nTOTAL\n9.57\n..."
 }
 ```
 
 Exit codes: `0` success, `2` invalid input (missing/unsupported/empty/oversized),
 `1` OCR failure (undecodable image or inference error). Messages go to stderr.
+
+### 2. Extraction — OCR JSON to invoice JSON
+
+Transform a saved OCR JSON into structured invoice data (no OCR model run):
+
+```powershell
+documind-extract outputs/sample_receipt.json -o outputs/sample_receipt.invoice.json
+```
+
+Default output: `outputs/<stem>.invoice.json`. Exit codes: `0` success,
+`2` invalid input (missing file, non-JSON, malformed JSON), `1` IO error.
+
+Example output (excerpt, from the synthetic sample):
+
+```json
+{
+  "invoice": {
+    "supplier": "MINI MART EXPRESS",
+    "invoice_number": "00001234",
+    "invoice_date": "2026-10-25",
+    "currency": "USD",
+    "line_items": [
+      {
+        "description": "SOAP",
+        "quantity": "2",
+        "unit_price": "2.50",
+        "line_total": "5.00"
+      }
+    ],
+    "subtotal": "8.70",
+    "tax": "0.87",
+    "total": "9.57",
+    "payment_amount": "10.00",
+    "change_amount": "0.43",
+    "validation_status": "ok",
+    "validation_errors": []
+  },
+  "provenance": {
+    "total": {"ocr_index": 24, "text": "9.57", "box": [[327.0, 494.0], "..."]}
+  }
+}
+```
+
+Financial values are decimal strings (parsed internally as `Decimal`,
+never float). Absent values are `null` — nothing is fabricated. Field
+rules and arithmetic checks: [docs/extraction-spec.md](docs/extraction-spec.md).
 
 ## Tests
 
@@ -97,33 +149,40 @@ Exit codes: `0` success, `2` invalid input (missing/unsupported/empty/oversized)
 pytest
 ```
 
-**Verified result: 20 passed in 0.17s.** All 20 tests run against
-**mocked** inference output (validation, result normalization, CLI
-help/error paths, and a mocked end-to-end JSON pipeline) — no real model
-is loaded or downloaded during tests.
+**Verified result: 59 passed** (20 M1 + 39 M2) — see Verification below for
+the exact run. All tests run against **mocked** OCR output and synthetic
+JSON fixtures; no real model is loaded or downloaded during tests, so a
+green suite validates application logic only, **not OCR model accuracy**.
+CI (`.github/workflows/ci.yml`) runs this same mocked suite on every pull
+request with Python 3.12, installing only `pytest` + `pillow` — no
+PaddlePaddle, no model weights, no GPU.
 
 **Verified end-to-end smoke test** (single image, real inference) on
-`assets/samples/sample_receipt.png`: 19 text regions recognized; all 15
-text lines of the synthetic receipt were read correctly (output kept
-locally at `outputs/sample_receipt.json`, not committed). This is a
+`assets/samples/sample_receipt.png`: 30 text regions recognized from the
+corrected synthetic receipt, followed by extraction of all invoice fields
+with `validation_status: ok` (see Verification below). This is a
 one-image functional smoke check on a clean synthetic input — it is
-**not** a measured accuracy benchmark. No accuracy metrics are claimed:
-that requires labeled ground-truth data and a defined metric (planned
-for M4). Confidence scores in the output are model self-assessment
-scores useful for filtering low-quality lines; they are **not calibrated
-probabilities**.
+**not** a measured accuracy benchmark. No extraction accuracy metrics are
+claimed: that requires labeled ground-truth data and a defined metric
+(planned for M4). Confidence scores in the OCR output are model
+self-assessment scores useful for filtering low-quality lines; they are
+**not calibrated probabilities**.
 
 ## Project Layout
 
 ```
-src/documind/        core package (cli.py, ocr/: validation, preprocessing,
-                     engine, results)
-tests/               pytest suite
+src/documind/        core package
+  cli.py               documind-ocr entry point
+  extract_cli.py       documind-extract entry point
+  ocr/                 validation, preprocessing, engine, results (M1)
+  extraction/          models, parsing, layout, extractor, validator (M2)
+tests/               pytest suite + fixtures/ocr/ synthetic OCR JSONs
 scripts/             dev utilities (sample receipt generator)
 assets/samples/      small synthetic sample documents
 data/                local datasets (ignored)
-docs/                setup, architecture, learning notes
+docs/                setup, architecture, extraction spec, learning notes
 reports/             future evaluation results
+.github/workflows/   CI (mocked unit tests, Python 3.12)
 ```
 
 ## Known Limitations
@@ -133,12 +192,15 @@ reports/             future evaluation results
 - oneDNN (MKLDNN) is disabled in the engine: the PaddlePaddle 3.x CPU
   Windows build crashes with a PIR attribute error when MKLDNN is on.
 - Single image per invocation; no PDF input yet.
-- No invoice field extraction, table reconstruction, database, or API yet.
-- English model by default (`--lang` passes through to PaddleOCR).
+- Extraction keywords are English-only (`TOTAL`, `CASH`, ...); strictly
+  extractive (never derives a line total from qty × price); single-page,
+  single-currency documents.
+- No table structure recognition, database, or API yet.
+- English OCR model by default (`--lang` passes through to PaddleOCR).
 
 ## Roadmap
 
-- **M2:** receipt/invoice field extraction (regex + layout heuristics)
+- ~~**M2:** receipt/invoice field extraction (regex + layout heuristics)~~ ✓
 - **M3:** table structure recognition
 - **M4:** labeled evaluation dataset + accuracy metrics
 - **M5:** API service and frontend

@@ -17,7 +17,7 @@ class TestValidateImage:
     def test_unsupported_extension_raises(self, tmp_path):
         path = tmp_path / "document.gif"
         path.write_bytes(b"some bytes")
-        with pytest.raises(ValidationError, match="Unsupported image format"):
+        with pytest.raises(ValidationError, match="Unsupported file format"):
             validate_image(path)
 
     def test_empty_file_raises(self, tmp_path):

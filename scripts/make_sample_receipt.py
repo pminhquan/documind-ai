@@ -16,20 +16,31 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = REPO_ROOT / "assets" / "samples" / "sample_receipt.png"
 
 # (text, font_size, bold)
+#
+# Financial layout (all values internally consistent):
+#   line total  = quantity x unit price
+#   subtotal    = sum of line totals                 = 12.30
+#   tax         = 10% of subtotal                    =  1.23
+#   total       = subtotal + tax                     = 13.53
+#   change      = cash paid - total                  =  1.47
 RECEIPT_LINES: list[tuple[str, int, bool]] = [
     ("MINI MART EXPRESS", 34, True),
     ("123 Demo Street, Sample City", 22, False),
     ("Receipt #: 00001234", 22, False),
     ("Date: 2026-10-25   Time: 10:30", 22, False),
+    ("Currency: USD", 22, False),
     ("--------------------------------", 20, False),
-    ("SOAP X2                5.00", 24, False),
-    ("MILK 1L                2.50", 24, False),
-    ("BREAD                  1.20", 24, False),
-    ("EGGS X12               3.60", 24, False),
+    ("ITEM            QTY x PRICE   LINE TOTAL", 20, False),
+    ("SOAP            2 x 2.50          5.00", 24, False),
+    ("MILK 1L         1 x 2.50          2.50", 24, False),
+    ("BREAD           1 x 1.20          1.20", 24, False),
+    ("EGGS X12        1 x 3.60          3.60", 24, False),
     ("--------------------------------", 20, False),
-    ("TOTAL                  8.70", 26, True),
-    ("CASH                  10.00", 24, False),
-    ("CHANGE                 1.30", 24, False),
+    ("SUBTOTAL                          12.30", 26, False),
+    ("TAX 10%                            1.23", 24, False),
+    ("TOTAL                             13.53", 26, True),
+    ("CASH                              15.00", 24, False),
+    ("CHANGE                             1.47", 24, False),
     ("--------------------------------", 20, False),
     ("THANK YOU - SEE YOU AGAIN", 22, False),
 ]
