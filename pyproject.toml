@@ -12,6 +12,8 @@ dependencies = [
     "paddlepaddle>=3.0,<4",
     "paddleocr>=3.0,<4",
     "pillow>=10.1",
+    "opencv-contrib-python>=4.8",
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +24,7 @@ dev = [
 [project.scripts]
 documind-ocr = "documind.cli:main"
 documind-extract = "documind.extract_cli:main"
+documind-table = "documind.table_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
