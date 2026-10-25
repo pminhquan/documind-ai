@@ -15,7 +15,11 @@ colorama==0.4.6
 colorlog==6.12.0
 crc32c==2.9.post0
 cryptography==50.0.2
--e git+https://github.com/pminhquan/documind-ai.git@b0e7cfeee35c22bd9d2036c337a0d76f3bf174fc#egg=documind_ai
+# The project itself, installed editable from the local repository.
+# The relative path is resolved against this lock file's directory -
+# run from the repository root:
+#   pip install -r requirements.lock.txt
+-e .
 filelock==4.2.4
 frozenlist==1.8.0
 fsspec==2026.9.0
