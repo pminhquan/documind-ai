@@ -51,6 +51,11 @@ MAX_EXPORT_TABLES = 50
 MAX_TABLE_DIMENSION = 500
 MAX_EXPORT_CELLS = 20_000
 CORRECTION_PATH_RE = re.compile(r"^tables\[(\d+)\]\.cells\[(\d+)\]\[(\d+)\]$")
+XML_ILLEGAL_CHARS_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _xslt_safe_text(value) -> str:
+    return XML_ILLEGAL_CHARS_RE.sub("", "" if value is None else str(value))
 
 DEFAULT_EXPORT_NAMES = {
     "ocr-json": "ocr-result.json",
@@ -288,8 +293,8 @@ def _invoice_xlsx_content(invoice: dict) -> bytes:
     for row_index, key in enumerate(INVOICE_SCALAR_KEYS, start=1):
         value = invoice.get(key)
         sheet.cell(row=row_index, column=1, value=key).data_type = "s"
-        value_cell = sheet.cell(row=row_index, column=2,
-                                value="" if value is None else str(value))
+        safe_value = _xslt_safe_text(value)
+        value_cell = sheet.cell(row=row_index, column=2, value=safe_value)
         value_cell.data_type = "s"
     item_start = len(INVOICE_SCALAR_KEYS) + 2
     sheet.cell(row=item_start, column=1, value="Line items").data_type = "s"
@@ -297,8 +302,8 @@ def _invoice_xlsx_content(invoice: dict) -> bytes:
         sheet.cell(row=item_start + 1, column=column, value=key).data_type = "s"
     for offset, item in enumerate(invoice.get("line_items") or [], start=1):
         for column, key in enumerate(INVOICE_ITEM_KEYS, start=1):
-            value = "" if item.get(key) is None else str(item.get(key))
-            cell = sheet.cell(row=item_start + 1 + offset, column=column, value=value)
+            cell = sheet.cell(row=item_start + 1 + offset, column=column,
+                              value=_xslt_safe_text(item.get(key)))
             cell.data_type = "s"
     target = io.BytesIO()
     workbook.save(target)

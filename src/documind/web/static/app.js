@@ -7,7 +7,8 @@ const state = {
   naturalWidth: 0,
   naturalHeight: 0,
   machine: null,     // untouched model output for the active document/page
-  corrections: {},   // user corrections, keyed by field path
+  activeDocKey: null, // "filename#pageLabel" — corrections never leak across docs/pages
+  correctionsByDoc: {}, // { docKey: { fieldPath: value } }
   cancelled: false,
   batchResults: [],  // per-file results in batch mode
 };
@@ -56,7 +57,8 @@ function loadFile(file, allFiles) {
   state.files = allFiles && allFiles.length > 1 ? allFiles : [file];
   state.file = file;
   state.machine = null;
-  state.corrections = {};
+  state.correctionsByDoc = {};     // new selection: drop stale edits
+  state.activeDocKey = `${file.name}#0`;
   state.batchResults = [];
   if (state.imageUrl) URL.revokeObjectURL(state.imageUrl);
   state.imageUrl = URL.createObjectURL(file);
@@ -120,7 +122,7 @@ $("run-btn").addEventListener("click", async () => {
         }
         const result = await response.json();
         state.machine = result;
-        state.corrections = {};
+        state.activeDocKey = `${file.name}#0`;  // fresh machine output
         state.batchResults.push({
           filename: file.name,
           kind: exportKindFor(workflow, result),
@@ -177,12 +179,19 @@ function renderPdf(data) {
     tab.addEventListener("click", () => {
       nav.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", "false"));
       tab.setAttribute("aria-selected", "true");
+      // page switch: point corrections at this page and drop stale boxes
+      state.activeDocKey = `${state.file.name}#${page.page_index}`;
+      clearOverlay();
       renderResults(data.workflows, page);
     });
     nav.appendChild(tab);
   });
   const first = data.pages.find((page) => !page.error);
-  if (first) renderResults(data.workflows, first);
+  if (first) {
+    state.activeDocKey = `${state.file.name}#${first.page_index}`;
+    clearOverlay();
+    renderResults(data.workflows, first);
+  }
 }
 
 function renderResults(workflow, pageOverride) {
@@ -195,6 +204,7 @@ function renderResults(workflow, pageOverride) {
   $("ocr-panel").classList.toggle("hidden", !data.ocr);
   $("invoice-panel").classList.toggle("hidden", !data.invoice);
   $("tables-panel").classList.toggle("hidden", !data.tables);
+  if (!data.ocr) clearOverlay();  // no OCR on this page: old boxes must not linger
   if (data.ocr) renderOcr(data.ocr);
   if (data.invoice) renderInvoice(data.invoice);
   if (data.tables) renderTables(data.tables);
@@ -308,7 +318,24 @@ function renderInvoice(invoice) {
 }
 
 function recordCorrection(path, value) {
-  state.corrections[path] = value;
+  if (!state.activeDocKey) return;
+  if (!state.correctionsByDoc[state.activeDocKey]) {
+    state.correctionsByDoc[state.activeDocKey] = {};
+  }
+  state.correctionsByDoc[state.activeDocKey][path] = value;
+  updateCorrectionCount();
+}
+
+function activeCorrections() {
+  return state.correctionsByDoc[state.activeDocKey] || {};
+}
+
+function updateCorrectionCount() {
+  const count = Object.keys(activeCorrections()).length;
+  const status = $("status");
+  if (status && count && !status.classList.contains("error")) {
+    status.textContent = `${count} unsaved correction(s) on ${state.activeDocKey}`;
+  }
 }
 
 function highlightProvenance(provenance) {
@@ -346,13 +373,21 @@ function markEdited(input, label) {
 }
 
 $("invoice-reset").addEventListener("click", () => {
-  state.corrections = Object.fromEntries(
-    Object.entries(state.corrections).filter(([key]) => !key.startsWith("invoice.")));
+  const key = state.activeDocKey;
+  if (key && state.correctionsByDoc[key]) {
+    state.correctionsByDoc[key] = Object.fromEntries(
+      Object.entries(state.correctionsByDoc[key])
+        .filter(([path]) => !path.startsWith("invoice.")));
+  }
   renderInvoice(state.machine.invoice);
 });
 $("tables-reset").addEventListener("click", () => {
-  state.corrections = Object.fromEntries(
-    Object.entries(state.corrections).filter(([key]) => !key.startsWith("tables.")));
+  const key = state.activeDocKey;
+  if (key && state.correctionsByDoc[key]) {
+    state.correctionsByDoc[key] = Object.fromEntries(
+      Object.entries(state.correctionsByDoc[key])
+        .filter(([path]) => !path.startsWith("tables")));
+  }
   renderTables(state.machine.tables);
 });
 
@@ -491,7 +526,7 @@ function buildExportPayload(kind) {
 
 function pickCorrections(prefix) {
   const picked = {};
-  Object.entries(state.corrections).forEach(([key, value]) => {
+  Object.entries(activeCorrections()).forEach(([key, value]) => {
     if (key.startsWith(prefix)) picked[key.slice(prefix.length)] = value;
   });
   return picked;

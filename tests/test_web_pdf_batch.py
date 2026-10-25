@@ -7,6 +7,7 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from raw_pdf_helper import make_pdf_with_two_large_pages, make_raw_pdf
 
 from documind.web import service
 from documind.web.app import create_app
@@ -84,6 +85,58 @@ class TestPdfProcessing:
                                                  "application/pdf")})
         assert response.status_code == 400
         assert "limit" in response.json()["detail"]
+
+
+class TestPdfPreflight:
+    """P0.2: reject oversized pages BEFORE allocating the bitmap."""
+
+    def test_huge_mediabox_rejected_preflight(self, tmp_path):
+        from documind.web.pdf import PdfError, render_pdf_pages
+
+        # below the 15000pt side cap, but scale 2 -> 14000x14000 px = 196MP
+        with pytest.raises(PdfError, match="too large"):
+            render_pdf_pages(make_raw_pdf(7000, 7000), tmp_path)
+        assert list(tmp_path.iterdir()) == []  # nothing rendered
+
+    def test_point_cap_rejected(self, tmp_path):
+        from documind.web.pdf import PdfError, render_pdf_pages
+
+        # a single side beyond the 15000pt cap is unusable
+        with pytest.raises(PdfError, match="unusable dimensions"):
+            render_pdf_pages(make_raw_pdf(20000, 200), tmp_path)
+
+    def test_normal_page_passes_preflight(self, tmp_path):
+        from documind.web.pdf import render_pdf_pages
+
+        paths = render_pdf_pages(make_raw_pdf(200, 100), tmp_path)
+        assert [path.name for path in paths] == ["page_000.png"]
+
+    def test_cumulative_budget_enforced(self, tmp_path, monkeypatch):
+        import documind.web.pdf as pdf_module
+
+        monkeypatch.setattr(pdf_module, "MAX_PAGE_PIXELS", 2_000_000)
+        monkeypatch.setattr(pdf_module, "MAX_TOTAL_PIXELS", 3_000_000)
+        # two 1800x900px pages = 1.62MP each; cumulative 3.24MP > 3MP
+        with pytest.raises(pdf_module.PdfError, match="pixel budget"):
+            pdf_module.render_pdf_pages(make_pdf_with_two_large_pages(), tmp_path)
+
+
+class TestInvoiceExportHardening:
+    """P0.3: XLSX must strip XML-illegal control characters (openpyxl
+    raises IllegalCharacterError -> unhandled 500 without this)."""
+
+    def test_control_characters_stripped_not_500(self, client):
+        from openpyxl import load_workbook
+
+        response = client.post("/api/export", json={
+            "kind": "invoice-xlsx",
+            "data": {"invoice": {"supplier": "ACMECORP",
+                                 "total": "5.00"}}})
+        assert response.status_code == 200
+        sheet = load_workbook(io.BytesIO(response.content))["Invoice"]
+        values = {sheet.cell(row=r, column=1).value: sheet.cell(row=r, column=2).value
+                  for r in range(1, 11)}
+        assert values["supplier"] == "ACMECORP"
 
 
 class TestOcrTxtExport:
