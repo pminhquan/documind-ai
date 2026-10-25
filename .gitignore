@@ -1,9 +1,11 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
 *.egg-info/
+build/
+dist/
 
 # Secrets
 .env
@@ -21,12 +23,21 @@ htmlcov/
 .idea/
 .vscode/
 
-# Datasets and generated files
-data/raw/
-data/processed/
-models/checkpoints/
+# Datasets and generated files (keep directory placeholders)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+models/
 outputs/
 *.log
+
+# Downloaded model weights / OCR caches
+.paddleocr/
+.paddlex/
+*.pdiparams
+*.pdmodel
+*.onnx
 
 # OS
 .DS_Store
