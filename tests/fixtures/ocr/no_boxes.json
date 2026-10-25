@@ -1,0 +1,11 @@
+{
+ "engine": "paddleocr",
+ "items": [
+  {
+   "text": "MINI MART EXPRESS"
+  },
+  {
+   "text": "TOTAL 9.57"
+  }
+ ]
+}

@@ -1,0 +1,234 @@
+"""Extraction pipeline tests using synthetic OCR JSON fixtures.
+
+Every fixture has known expected outputs; nothing here runs an OCR model
+or claims model accuracy — these tests validate the deterministic rules.
+"""
+
+import json
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+
+from documind.extraction import (
+    STATUS_INVALID,
+    STATUS_OK,
+    STATUS_REVIEW,
+    OcrInputError,
+    extract,
+    load_ocr_document,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures" / "ocr"
+
+
+def load_fixture(name: str) -> dict:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+def money(value: str) -> Decimal:
+    return Decimal(value)
+
+
+class TestNormalReceipt:
+    @pytest.fixture
+    def result(self):
+        return extract(load_fixture("normal_receipt.json"), source="fixture")
+
+    def test_header_fields(self, result):
+        invoice = result.invoice
+        assert invoice.supplier == "MINI MART EXPRESS"
+        assert invoice.invoice_number == "00001234"
+        assert invoice.invoice_date.isoformat() == "2026-10-25"
+        assert invoice.currency == "USD"
+
+    def test_line_items_with_layout(self, result):
+        items = result.invoice.line_items
+        assert [(i.description, i.quantity, i.unit_price, i.line_total) for i in items] == [
+            ("SOAP", money("2"), money("2.50"), money("5.00")),
+            ("MILK 1L", money("1"), money("2.50"), money("2.50")),
+            ("BREAD", money("1"), money("1.20"), money("1.20")),
+        ]
+
+    def test_summary_amounts_and_status(self, result):
+        invoice = result.invoice
+        assert invoice.subtotal == money("8.70")
+        assert invoice.tax == money("0.87")
+        assert invoice.total == money("9.57")
+        assert invoice.payment_amount == money("10.00")
+        assert invoice.change_amount == money("0.43")
+        assert invoice.validation_status == STATUS_OK
+        assert invoice.validation_errors == []
+
+    def test_provenance_links_to_ocr_regions(self, result):
+        prov = result.provenance
+        assert prov["total"].text == "9.57"
+        assert prov["total"].box[0] == [327.0, 494.0]
+        assert prov["supplier"].ocr_index == 0
+        assert prov["line_items[0].line_total"].text == "5.00"
+
+    def test_json_serialization_keeps_decimal_scale(self, result):
+        data = json.loads(result.to_json())
+        assert data["invoice"]["total"] == "9.57"
+        assert data["invoice"]["line_items"][0]["unit_price"] == "2.50"
+        assert data["provenance"]["total"]["ocr_index"] >= 0
+
+
+class TestMissingFields:
+    def test_absent_fields_stay_null(self):
+        result = extract(load_fixture("missing_fields.json"))
+        invoice = result.invoice
+        assert invoice.supplier == "MINI MART EXPRESS"
+        assert invoice.total == money("9.57")
+        assert invoice.invoice_number is None
+        assert invoice.invoice_date is None
+        assert invoice.currency is None
+        assert invoice.line_items == []
+        assert invoice.subtotal is None
+        assert invoice.tax is None
+        assert invoice.discount is None
+        assert invoice.payment_amount is None
+        assert invoice.change_amount is None
+        assert invoice.validation_status == STATUS_OK
+
+
+class TestDateFormats:
+    @pytest.mark.parametrize(
+        "date_text, expected",
+        [
+            ("Date: 2026-10-25", "2026-10-25"),
+            ("Date: 25/10/2026", "2026-10-25"),
+            ("Date: 25.10.2026", "2026-10-25"),
+            ("Date: 05 Apr 2026", "2026-04-05"),
+            ("Date: 10/25/2026", "2026-10-25"),  # month-first fallback
+        ],
+    )
+    def test_date_normalization(self, date_text, expected):
+        document = {"items": [{"text": "MINI MART", "box": []},
+                              {"text": date_text, "box": []}]}
+        result = extract(document)
+        assert result.invoice.invoice_date.isoformat() == expected
+
+    def test_unparseable_date_stays_none(self):
+        document = {"items": [{"text": "Date: sometime soon", "box": []}]}
+        assert extract(document).invoice.invoice_date is None
+
+
+class TestMonetarySeparators:
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("1,234.56", "1234.56"),  # US thousands
+            ("1.234,56", "1234.56"),  # EU thousands
+            ("12,30", "12.30"),  # EU decimal comma
+            ("1,234", "1234"),  # thousands group
+            ("1.234", "1234"),  # thousands group (3 decimals)
+            ("12.30", "12.30"),
+            ("$13.53", "13.53"),
+        ],
+    )
+    def test_amount_parsing(self, text, expected):
+        from documind.extraction.parsing import parse_amount
+
+        assert parse_amount(text) == money(expected)
+
+    def test_eu_separator_fixture(self):
+        result = extract(load_fixture("eu_separators.json"))
+        invoice = result.invoice
+        assert invoice.invoice_date.isoformat() == "2026-10-25"
+        assert invoice.line_items[0].quantity == money("2")
+        assert invoice.line_items[0].unit_price == money("500.00")
+        assert invoice.line_items[0].line_total == money("1000.00")
+        assert invoice.subtotal == money("1000.00")
+        assert invoice.tax == money("234.56")
+        assert invoice.total == money("1234.56")
+        assert invoice.validation_status == STATUS_OK
+
+
+class TestMissingBoxes:
+    def test_extraction_without_boxes(self):
+        result = extract(load_fixture("no_boxes.json"))
+        invoice = result.invoice
+        assert invoice.supplier == "MINI MART EXPRESS"
+        assert invoice.total == money("9.57")
+        # provenance entries exist but carry empty boxes
+        assert result.provenance["total"].box == []
+
+
+class TestValidation:
+    def test_incorrect_grand_total_is_invalid(self):
+        result = extract(load_fixture("bad_total.json"))
+        invoice = result.invoice
+        assert invoice.total == money("99.99")
+        assert invoice.validation_status == STATUS_INVALID
+        assert any("total != subtotal + tax" in e for e in invoice.validation_errors)
+
+    def test_duplicate_total_labels_same_value(self):
+        result = extract(load_fixture("duplicate_totals.json"))
+        invoice = result.invoice
+        assert invoice.total == money("5.00")
+        assert invoice.validation_status == STATUS_REVIEW
+        assert any("TOTAL" in e for e in invoice.validation_errors)
+
+    def test_duplicate_totals_with_different_values_keep_bottom_most(self):
+        document = {"items": [
+            {"text": "TOTAL 9.57", "box": []},
+            {"text": "TOTAL 12.00", "box": []},
+        ]}
+        result = extract(document)
+        assert result.invoice.total == money("12.00")
+        assert result.invoice.validation_status == STATUS_REVIEW
+
+    def test_discount_and_tax_arithmetic(self):
+        result = extract(load_fixture("discounts.json"))
+        invoice = result.invoice
+        assert invoice.subtotal == money("10.00")
+        assert invoice.discount == money("1.00")
+        assert invoice.tax == money("0.90")
+        assert invoice.total == money("9.90")  # 10.00 - 1.00 + 0.90
+        assert invoice.validation_status == STATUS_OK
+
+
+class TestAmbiguity:
+    def test_ambiguous_quantity_not_fabricated(self):
+        result = extract(load_fixture("ambiguous_line.json"))
+        item = result.invoice.line_items[0]
+        assert item.description == "SOAP X2"
+        assert item.quantity is None  # "X2" is not an explicit qty x price row
+        assert item.unit_price is None
+        assert item.line_total == money("5.00")
+        assert result.invoice.validation_status == STATUS_OK
+
+
+class TestEdgeCases:
+    def test_empty_ocr_output(self):
+        result = extract(load_fixture("empty_items.json"))
+        invoice = result.invoice
+        assert invoice.supplier is None
+        assert invoice.line_items == []
+        assert invoice.total is None
+        assert invoice.validation_status == STATUS_OK
+
+    def test_malformed_json_rejected(self):
+        with pytest.raises(OcrInputError, match="Malformed JSON"):
+            load_ocr_document(FIXTURES / "malformed.json")
+
+    def test_non_object_json_rejected(self, tmp_path):
+        path = tmp_path / "list.json"
+        path.write_text("[]", encoding="utf-8")
+        with pytest.raises(OcrInputError, match="must be an object"):
+            load_ocr_document(path)
+
+    def test_multi_line_product_description(self):
+        result = extract(load_fixture("multiline_description.json"))
+        item = result.invoice.line_items[0]
+        assert item.description == "SOAP LAVENDER 90G"
+        assert item.quantity == money("2")
+        assert item.unit_price == money("2.50")
+        assert item.line_total == money("5.00")
+        assert result.invoice.validation_status == STATUS_OK
+
+    def test_merges_split_header_cells(self):
+        # The real OCR splits the header row into two regions.
+        result = extract(load_fixture("normal_receipt.json"))
+        assert len(result.invoice.line_items) == 3
