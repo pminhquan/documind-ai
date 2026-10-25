@@ -19,7 +19,6 @@ def client():
 
 @pytest.fixture
 def mocked_engine(monkeypatch):
-    from tests.test_web_api import TestOcrEndpoint  # noqa: F401  (context only)
 
     class FakeEngine:
         def __init__(self):
