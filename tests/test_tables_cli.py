@@ -81,6 +81,28 @@ class TestTableCliNoTable:
         assert data["tables"] == []
         assert any("no ruled table" in w for w in data["warnings"])
 
+    def test_blank_image_with_all_exports_succeeds(self, tmp_path):
+        """Regression: --xlsx on a table-less image must not crash."""
+        from openpyxl import load_workbook
+
+        blank = tmp_path / "blank.png"
+        Image.new("RGB", (200, 200), color="white").save(blank)
+        output = tmp_path / "out.json"
+        xlsx = tmp_path / "out.xlsx"
+        csv_path = tmp_path / "out.csv"
+
+        code = table_cli.main([
+            str(blank), "-o", str(output),
+            "--csv", str(csv_path), "--xlsx", str(xlsx),
+        ])
+        assert code == 0
+        data = json.loads(output.read_text(encoding="utf-8"))
+        assert data["tables"] == []
+        assert any("no ruled table" in w for w in data["warnings"])
+        assert not csv_path.exists()  # zero tables -> zero CSV files
+        assert xlsx.exists()          # but a valid, empty workbook
+        assert load_workbook(xlsx).sheetnames == ["Sheet"]
+
 
 class TestTableCliHappyPath:
     @pytest.fixture
