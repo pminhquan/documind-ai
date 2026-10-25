@@ -82,7 +82,7 @@ def render_receipt(output_path: Path) -> Path:
     draw = ImageDraw.Draw(image)
 
     y = padding
-    for (text, size, bold), line_height in zip(RECEIPT_LINES, line_heights):
+    for (text, size, bold), line_height in zip(RECEIPT_LINES, line_heights, strict=True):
         font = _find_font(size, bold)
         draw.text((padding, y), text, fill="black", font=font)
         y += line_height + line_gap

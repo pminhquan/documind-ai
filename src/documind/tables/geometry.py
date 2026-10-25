@@ -34,7 +34,7 @@ class GridGeometry:
 
     row_edges: list[int] = field(default_factory=list)
     col_edges: list[int] = field(default_factory=list)
-    region: Rect = Rect(0, 0, 0, 0)
+    region: Rect = field(default_factory=lambda: Rect(0, 0, 0, 0))
 
     @property
     def rows(self) -> int:
@@ -94,7 +94,7 @@ def _line_positions(mask: np.ndarray, axis: int, min_count: int) -> list[int]:
             positions[-1].append(value)
         else:
             positions.append([value])
-    return [int(round(sum(cluster) / len(cluster))) for cluster in positions]
+    return [round(sum(cluster) / len(cluster)) for cluster in positions]
 
 
 def _dedupe_sorted(values: list[int], min_gap: int = 5) -> list[int]:

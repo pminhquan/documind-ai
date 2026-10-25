@@ -21,11 +21,11 @@ __all__ = [
     "Manifest",
     "ManifestEntry",
     "ManifestError",
-    "load_manifest",
     "TextMetricResult",
     "edit_operations",
     "error_rate",
     "levenshtein_distance",
+    "load_manifest",
     "micro_aggregate",
     "normalize_text",
 ]

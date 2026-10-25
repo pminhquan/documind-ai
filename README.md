@@ -94,11 +94,11 @@ Example output (excerpt):
   "items": [
     {
       "text": "TOTAL",
-      "confidence": 0.9999812245368958,
-      "box": [[36.0, 360.0], [129.0, 360.0], [129.0, 388.0], [36.0, 388.0]]
+      "confidence": 0.9999762773513794,
+      "box": [[37.0, 498.0], [128.0, 498.0], [128.0, 523.0], [37.0, 523.0]]
     }
   ],
-  "full_text": "MINI MART EXPRESS\n...\nTOTAL\n9.57\n..."
+  "full_text": "MINI MART EXPRESS\n...\nSUBTOTAL\n12.30\nTAX 10%\n1.23\nTOTAL\n13.53\n..."
 }
 ```
 
@@ -133,16 +133,16 @@ Example output (excerpt, from the synthetic sample):
         "line_total": "5.00"
       }
     ],
-    "subtotal": "8.70",
-    "tax": "0.87",
-    "total": "9.57",
-    "payment_amount": "10.00",
-    "change_amount": "0.43",
+    "subtotal": "12.30",
+    "tax": "1.23",
+    "total": "13.53",
+    "payment_amount": "15.00",
+    "change_amount": "1.47",
     "validation_status": "ok",
     "validation_errors": []
   },
   "provenance": {
-    "total": {"ocr_index": 24, "text": "9.57", "box": [[327.0, 494.0], "..."]}
+    "total": {"ocr_index": 24, "text": "13.53", "box": [[327.0, 494.0], "..."]}
   }
 }
 ```
@@ -229,11 +229,14 @@ manually — never generated from predictions. Real-document metrics are
 ## Tests
 
 ```powershell
-pytest
+python scripts/verify.py   # ruff check + pytest
+pytest                         # tests only
 ```
 
-**Verified result: 209 passed** (20 M1 + 46 M2 + 41 M3A + 102 M4) — see
-Verification below for the exact run. All tests run against **mocked**
+**Current status:** the full suite passes on the latest CI run of
+`main` (check the Actions tab for the exact count — it grows with every
+milestone). Run `pytest` locally, or `python scripts/verify.py` for lint
+plus tests. All tests run against **mocked**
 OCR output, synthetic JSON fixtures, or geometry-only synthetic images;
 no real model is loaded or downloaded during tests, so a green suite
 validates application logic only, **not OCR model accuracy**.

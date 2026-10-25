@@ -11,11 +11,10 @@ from pathlib import Path
 
 from .dataset import (
     DATASET_README,
-    DatasetError,
     TASKS,
+    DatasetError,
     add_document,
     annotated_document_ids,
-    build_task_manifest,
     dataset_root,
     find_document_image,
     init_dataset,

@@ -27,7 +27,7 @@ def draw_grid(
 
 def close_to(values, expected, tolerance=3):
     assert len(values) == len(expected)
-    for got, want in zip(values, expected):
+    for got, want in zip(values, expected, strict=True):
         assert abs(got - want) <= tolerance, f"{values} vs {expected}"
 
 

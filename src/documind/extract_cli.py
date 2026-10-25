@@ -7,7 +7,6 @@ without re-running the OCR model:
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
