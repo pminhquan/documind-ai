@@ -27,9 +27,11 @@ documind-dataset add path\to\anonymized-receipt.jpg --id receipt-001 --confirm-a
 documind-dataset validate
 
 # 5. Run the existing pipelines on annotated documents (local venv;
-#    runs PaddleOCR — never in CI):
+#    runs PaddleOCR — never in CI). OCR is regenerated on every run,
+#    including the OCR step inside invoice prediction, so a modified
+#    image can never reuse a stale OCR output:
 documind-dataset predict --task ocr
-documind-dataset predict --task invoice   # reuses saved OCR predictions
+documind-dataset predict --task invoice
 documind-dataset predict --task table
 # each step writes manifest-<task>.json (provenance: real)
 
