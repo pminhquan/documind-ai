@@ -15,8 +15,8 @@ prefer completing PR B (web app) correctly over partially doing B–E.
 - [x] Phase 1 / PR A — quality foundations + agent skills (this PR)
 - [x] Phase 2 / PR B — M5A: local FastAPI backend + web frontend
 - [x] Phase 3 / PR C — M5B: PDF input, batch processing, richer exports
-- [ ] Phase 4 / PR D — M5C: extraction robustness + Vietnamese labels/i18n (pending)
-- [ ] Phase 5 / PR E — performance profiling + release polish (pending)
+- [ ] Phase 4 / PR D — M5C: extraction robustness + Vietnamese labels/i18n (pending — next stacked PR; design notes: label lexicon separated from parsing, VND symbols, no metric redefinitions)
+- [ ] Phase 5 / PR E — performance profiling + release polish (pending — benchmark script + cold/warm inference measurement first)
 - [ ] Phase 5 / PR E — performance profiling + release polish
 
 ## PR A — Quality foundations (done)
