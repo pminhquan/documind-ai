@@ -21,29 +21,47 @@ def _normalize(value) -> str:
 
 
 def _predicted_matrix(table: dict, rows: int, columns: int,
-                      issues: list[str]) -> list[list[str]]:
-    """Read a predicted table into an expected-shape text grid."""
-    matrix = [[None] * columns for _ in range(rows)]
+                      issues: list[str]) -> tuple[list[list[str | None]], int]:
+    """Read a predicted table into an expected-shape text grid.
+
+    Returns the grid plus the count of *unexpected* predicted cells:
+    non-integer/missing coordinates, coordinates outside the expected
+    shape, and duplicate coordinates. The first write to a coordinate
+    wins; every later occurrence is unexpected content and is counted
+    (never silently overwritten or ignored).
+    """
+    matrix: list[list[str | None]] = [[None] * columns for _ in range(rows)]
+    unexpected = 0
     for cell in table.get("cells", []):
         row_index = cell.get("row_index")
         column_index = cell.get("column_index")
         if not (isinstance(row_index, int) and isinstance(column_index, int)):
-            issues.append(f"cell with non-integer indices ignored: {cell!r}")
+            unexpected += 1
+            issues.append(f"cell with non-integer indices counted as extra: {cell!r}")
             continue
         if 0 <= row_index < rows and 0 <= column_index < columns:
+            if matrix[row_index][column_index] is not None:
+                unexpected += 1
+                issues.append(
+                    f"duplicate predicted cell ({row_index}, {column_index}) "
+                    f"counted as extra: {cell.get('text')!r} "
+                    f"(kept {matrix[row_index][column_index]!r})"
+                )
+                continue
             matrix[row_index][column_index] = str(cell.get("text") or "")
         else:
+            unexpected += 1
             issues.append(
                 f"cell ({row_index}, {column_index}) outside expected shape "
                 f"{rows}x{columns} counted as extra"
             )
-    return matrix
+    return matrix, unexpected
 
 
 def _compare_table(expected: dict, predicted: dict) -> dict:
     rows, columns = int(expected["rows"]), int(expected["columns"])
     issues: list[str] = []
-    predicted_matrix = _predicted_matrix(predicted, rows, columns, issues)
+    predicted_matrix, unexpected = _predicted_matrix(predicted, rows, columns, issues)
     expected_cells = expected.get("cells") or []
 
     structure_ok = predicted.get("rows") == rows and predicted.get("columns") == columns
@@ -87,6 +105,7 @@ def _compare_table(expected: dict, predicted: dict) -> dict:
                     incorrect += 1
 
     total = rows * columns
+    extra += unexpected  # unplaceable/duplicate predictions are pure extra
     return {
         "structure_ok": structure_ok,
         "expected_shape": [rows, columns],

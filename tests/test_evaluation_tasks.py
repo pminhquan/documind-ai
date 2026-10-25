@@ -309,6 +309,42 @@ class TestTableEvaluation:
         assert doc["tables_extra"] == 1
         assert summary["aggregate"]["structure_ok_documents"] == 0
 
+    def test_unexpected_predicted_cells_counted(self, tmp_path):
+        """Regression: cells outside the expected shape, duplicate
+        coordinates, and invalid coordinates were silently ignored or
+        overwritten instead of counting as unexpected content."""
+        predicted_table = {
+            "table_id": "table_0", "rows": 1, "columns": 1,
+            "cells": [
+                {"row_index": 0, "column_index": 0, "text": "A"},
+                {"row_index": 5, "column_index": 0, "text": "OUTSIDE"},
+                {"row_index": 0, "column_index": 0, "text": "DUPLICATE"},
+                {"row_index": "x", "column_index": 0, "text": "INVALID"},
+            ],
+        }
+        summary = self.eval_one(tmp_path, "doc", [self.truth(1, 1, [["A"]])],
+                                [predicted_table])
+        comparison = summary["documents"][0]["comparisons"][0]
+        # first write wins; the other three predictions are unexpected
+        assert comparison["cells_matched"] == 1
+        assert comparison["extra_cells"] == 3
+        assert len(comparison["issues"]) == 3
+        assert summary["aggregate"]["extra_cells"] == 3
+
+    def test_missing_cell_entries_counted(self, tmp_path):
+        predicted_table = {
+            "table_id": "table_0", "rows": 2, "columns": 2,
+            "cells": [
+                {"row_index": 0, "column_index": 0, "text": "A"},
+            ],
+        }
+        summary = self.eval_one(tmp_path, "doc",
+                                [self.truth(2, 2, [["A", "B"], ["C", "D"]])],
+                                [predicted_table])
+        comparison = summary["documents"][0]["comparisons"][0]
+        assert comparison["missing_cells"] == 3
+        assert comparison["cell_exact_agreement"] == 0.25
+
     def test_normalization_casefold_and_whitespace(self, tmp_path):
         cells = [["Red  Delicious Apple", "12"]]
         predicted = [["red delicious apple", "12"]]
