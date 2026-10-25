@@ -1,0 +1,5 @@
+{
+  "_comment": "OCR ground-truth template. reference_text is the exact transcription of the image content, in reading order. Normalize spacing as you would read it, not as printed column alignment.",
+  "id": "<document-id>",
+  "reference_text": "<full text transcription>"
+}

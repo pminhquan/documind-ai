@@ -1,0 +1,4 @@
+{
+ "id": "sample_receipt",
+ "reference_text": "MINI MART EXPRESS\n123 Demo Street, Sample City\nReceipt #: 00001234\nDate: 2026-10-25   Time: 10:30\nCurrency: USD\n--------------------------------\nITEM            QTY x PRICE   LINE TOTAL\nSOAP            2 x 2.50          5.00\nMILK 1L         1 x 2.50          2.50\nBREAD           1 x 1.20          1.20\nEGGS X12        1 x 3.60          3.60\n--------------------------------\nSUBTOTAL                          12.30\nTAX 10%                            1.23\nTOTAL                             13.53\nCASH                              15.00\nCHANGE                             1.47\n--------------------------------\nTHANK YOU - SEE YOU AGAIN"
+}

@@ -1,0 +1,20 @@
+{
+  "_comment": "Table ground-truth template. rows x columns describe the FULL grid; cells is a rows x columns matrix of strings (empty string for empty cells). One file may hold several tables under 'tables'.",
+  "id": "<document-id>",
+  "tables": [
+    {
+      "rows": 2,
+      "columns": 2,
+      "cells": [
+        [
+          "Header A",
+          "Header B"
+        ],
+        [
+          "value",
+          ""
+        ]
+      ]
+    }
+  ]
+}
