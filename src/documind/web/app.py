@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import tempfile
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -41,6 +42,15 @@ ALLOWED_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"
 EXPORT_KINDS = frozenset({"ocr-json", "invoice-json", "table-json", "table-csv", "table-xlsx"})
 SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Resource limits: uploads are decoded-checked for pixel budget, exports
+# are bounded so a hostile payload cannot force expensive allocation.
+MAX_IMAGE_DIMENSION = 10_000
+MAX_IMAGE_PIXELS = 30_000_000
+MAX_EXPORT_TABLES = 50
+MAX_TABLE_DIMENSION = 500
+MAX_EXPORT_CELLS = 20_000
+CORRECTION_PATH_RE = re.compile(r"^tables\[(\d+)\]\.cells\[(\d+)\]\[(\d+)\]$")
 
 DEFAULT_EXPORT_NAMES = {
     "ocr-json": "ocr-result.json",
@@ -79,7 +89,16 @@ def _read_and_validate_upload(upload: UploadFile) -> Path:
         raise UploadValidationError(status_code=400, detail="Empty upload")
 
     try:
-        Image.open(io.BytesIO(content)).verify()
+        with Image.open(io.BytesIO(content)) as image:
+            width, height = image.size
+        if max(width, height) > MAX_IMAGE_DIMENSION or width * height > MAX_IMAGE_PIXELS:
+            raise UploadValidationError(
+                status_code=413,
+                detail=f"Image dimensions too large ({width}x{height}). Limit: "
+                f"{MAX_IMAGE_DIMENSION}px per side / {MAX_IMAGE_PIXELS // 1_000_000} MP",
+            )
+    except UploadValidationError:
+        raise
     except Exception as exc:
         raise UploadValidationError(
             status_code=400, detail="Upload is not a decodable image"
@@ -95,16 +114,81 @@ def _read_and_validate_upload(upload: UploadFile) -> Path:
     return Path(handle.name)
 
 
+def _apply_table_corrections(payload: dict) -> TableResult:
+    """Build a corrected :class:`TableResult` from a HITL payload.
+
+    ``user_corrections`` keys must be exactly ``tables[T].cells[R][C]``
+    with T/R/C inside the machine output's bounds; the machine result is
+    never mutated — corrected values are applied to a fresh copy. Invalid
+    or out-of-bounds paths are rejected with 422 (no silent ignoring, no
+    arbitrary object paths).
+    """
+    result = _table_result_from_payload(payload)
+    corrections = payload.get("user_corrections")
+    if corrections in (None, {}):
+        return result
+
+    if not isinstance(corrections, dict):
+        raise HTTPException(status_code=422,
+                            detail="'user_corrections' must be an object")
+
+    cells_by_position: dict[tuple[int, int, int], TableCell] = {}
+    for table_index, table in enumerate(result.tables):
+        for cell in table.cells:
+            cells_by_position[(table_index, cell.row_index, cell.column_index)] = cell
+
+    for raw_path, value in corrections.items():
+        match = CORRECTION_PATH_RE.match(str(raw_path))
+        if not match:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid correction path {raw_path!r}: must look like "
+                "'tables[0].cells[1][2]'",
+            )
+        table_index, row_index, column_index = map(int, match.groups())
+        cell = cells_by_position.get((table_index, row_index, column_index))
+        if cell is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Correction {raw_path!r}: cell coordinates out of bounds",
+            )
+        cell.text = "" if value is None else str(value)
+    return result
+
+
 def _table_result_from_payload(payload: dict) -> TableResult:
     """Accept a raw table result dict or one of the known export wrappers
     (``machine_output`` from the human-in-the-loop payload, or
-    ``tables_result``)."""
+    ``tables_result``). Enforces bounded table/cell counts."""
     if "tables" not in payload:
         for wrapper in ("machine_output", "tables_result"):
             candidate = payload.get(wrapper)
             if isinstance(candidate, dict) and "tables" in candidate:
                 payload = candidate
                 break
+    tables = payload.get("tables", [])
+    if not isinstance(tables, list):
+        raise HTTPException(status_code=422, detail="'tables' must be a list")
+    if len(tables) > MAX_EXPORT_TABLES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many tables ({len(tables)}; limit {MAX_EXPORT_TABLES})",
+        )
+    total_cells = 0
+    for index, table in enumerate(tables):
+        rows, columns = int(table.get("rows", 0)), int(table.get("columns", 0))
+        if rows > MAX_TABLE_DIMENSION or columns > MAX_TABLE_DIMENSION:
+            raise HTTPException(
+                status_code=422,
+                detail=f"tables[{index}] exceeds the {MAX_TABLE_DIMENSION}x"
+                f"{MAX_TABLE_DIMENSION} dimension limit",
+            )
+        total_cells += rows * columns
+    if total_cells > MAX_EXPORT_CELLS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many cells ({total_cells}; limit {MAX_EXPORT_CELLS})",
+        )
     return TableResult(
         source_image=str(payload.get("source_image", "")),
         tables=[
@@ -219,6 +303,8 @@ def create_app() -> FastAPI:
         safe_name = SAFE_FILENAME_RE.sub("_", requested_name)[:100] or "export.bin"
 
         if kind.endswith("-json"):
+            # JSON exports pass through as-is: for HITL payloads this
+            # preserves BOTH machine output and user corrections.
             content = json.dumps(data, indent=2, ensure_ascii=False)
             return Response(
                 content=content,
@@ -226,30 +312,48 @@ def create_app() -> FastAPI:
                 headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
             )
 
-        result = _table_result_from_payload(data)
-        if kind in ("table-csv", "table-xlsx") and not result.tables:
+        from ..tables.exporters import export_csv, export_xlsx
+
+        # CSV/XLSX materialize user corrections into a fresh copy of the
+        # machine result; the original machine output is not mutated.
+        result = _apply_table_corrections(data)
+        if not result.tables:
             raise HTTPException(
                 status_code=422,
                 detail="No tables in the payload — nothing to export",
             )
-        with tempfile.TemporaryDirectory(prefix="documind_export_") as tmp:
-            target = Path(tmp) / safe_name
-            from ..tables.exporters import export_csv, export_xlsx
 
-            if kind == "table-csv":
-                export_csv(result, target)
-                media_type = "text/csv"
-            else:
-                export_xlsx(result, target)
-                media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            # Exports are bounded by the upload size limit, so reading the
-            # generated file into memory is safe; the temp dir is removed
-            # on context exit, before Starlette would stat a FileResponse.
-            return Response(
-                content=target.read_bytes(),
-                media_type=media_type,
-                headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
-            )
+        media_type = ("text/csv" if kind == "table-csv"
+                      else "application/vnd.openxmlformats-officedocument"
+                      ".spreadsheetml.sheet")
+        if kind == "table-csv" and len(result.tables) > 1:
+            # The CSV exporter writes one file per table (_t0, _t1, ...);
+            # package them into an in-memory ZIP with sanitized entries.
+            with tempfile.TemporaryDirectory(prefix="documind_export_") as tmp:
+                written = export_csv(result, Path(tmp) / "tables.csv")
+                buffer = io.BytesIO()
+                with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                    for path in written:
+                        archive.write(path, arcname=path.name)
+                content = buffer.getvalue()
+            safe_name = "tables.zip"
+            media_type = "application/zip"
+        else:
+            with tempfile.TemporaryDirectory(prefix="documind_export_") as tmp:
+                target = Path(tmp) / safe_name
+                if kind == "table-csv":
+                    export_csv(result, target)
+                else:
+                    export_xlsx(result, target)
+                # Exports are bounded by the payload limits, so reading the
+                # generated file into memory is safe; the temp dir is removed
+                # on context exit, before Starlette would stat a FileResponse.
+                content = target.read_bytes()
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        )
 
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
     return app

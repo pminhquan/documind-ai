@@ -48,8 +48,34 @@ per region (line grouping happens inside extraction).
 
 Export `kind`: `ocr-json`, `invoice-json`, `table-json` (JSON pass-through
 — human-in-the-loop payloads keep `machine_output` and `user_corrections`
-separate), `table-csv`, `table-xlsx` (formula-injection safe). Unknown
-kind → 422; table export with no tables → 422.
+separate), `table-csv`, `table-xlsx`. Unknown kind → 422; table export
+with no tables → 422.
+
+### Corrections materialization (CSV/XLSX)
+
+`table-csv` / `table-xlsx` **materialize** `user_corrections` into a
+fresh copy of the machine result: keys must be exactly
+`tables[T].cells[R][C]` with indices inside the machine output's bounds —
+invalid paths, wrong shapes, or out-of-bounds coordinates are rejected
+with 422 (no silent ignoring, no arbitrary object paths). The original
+`machine_output` is never mutated; JSON exports keep both parts separate.
+
+### Multi-table CSV
+
+`table-csv` with **one** table returns a single CSV file; with **two or
+more** tables it returns a ZIP archive (`tables.zip`) containing
+`tables_t0.csv`, `tables_t1.csv`, ... (sanitized entry names). Zero
+tables → 422.
+
+### Resource limits
+
+- Uploads: 10 MB bytes, extension allowlist, decoded-image limits
+  (10,000 px per side / 30 MP) — 413/415/400.
+- Exports: ≤ 50 tables, ≤ 500 rows/columns per table, ≤ 20,000 cells — 422.
+- Inference is serialized on one shared engine (PaddleOCR is not
+  thread-safe); the table pipeline reuses the shared engine runner
+  instead of constructing its own, and unified processing reuses OCR
+  items so OCR runs at most once per request.
 
 Error codes: `413` file too large (10 MB), `415` unsupported extension,
 `400` not a decodable image / empty upload, `422` unknown workflow or

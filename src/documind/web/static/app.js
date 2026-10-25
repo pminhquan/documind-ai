@@ -185,6 +185,7 @@ function renderInvoice(invoice) {
       recordCorrection(`invoice.${field}`, input.value === "" ? null : input.value);
       markEdited(input, field);
     });
+    attachProvenanceHighlight(input, invoice.provenance && invoice.provenance[field]);
     cell.appendChild(input);
     row.appendChild(label);
     row.appendChild(cell);
@@ -206,6 +207,9 @@ function renderInvoice(invoice) {
                          input.value === "" ? null : input.value);
         markEdited(input, `item ${index} ${key}`);
       });
+      const provKey = `line_items[${index}].${key}`;
+      attachProvenanceHighlight(input,
+        invoice.provenance && invoice.provenance[provKey]);
       cell.appendChild(input);
       row.appendChild(cell);
     });
@@ -215,6 +219,29 @@ function renderInvoice(invoice) {
 
 function recordCorrection(path, value) {
   state.corrections[path] = value;
+}
+
+function highlightProvenance(provenance) {
+  document.querySelectorAll("#box-overlay .box.prov").forEach((b) => b.remove());
+  if (!provenance || !Array.isArray(provenance.box) || provenance.box.length !== 4
+      || !state.naturalWidth || !state.naturalHeight) {
+    return; // no provenance, nothing to highlight — never fabricated
+  }
+  const xs = provenance.box.map((p) => p[0]);
+  const ys = provenance.box.map((p) => p[1]);
+  const div = document.createElement("div");
+  div.className = "box prov highlight";
+  div.style.left = `${Math.min(...xs) / state.naturalWidth * 100}%`;
+  div.style.top = `${Math.min(...ys) / state.naturalHeight * 100}%`;
+  div.style.width = `${(Math.max(...xs) - Math.min(...xs)) / state.naturalWidth * 100}%`;
+  div.style.height = `${(Math.max(...ys) - Math.min(...ys)) / state.naturalHeight * 100}%`;
+  $("box-overlay").appendChild(div);
+}
+
+function attachProvenanceHighlight(element, provenance) {
+  if (!provenance) return;
+  element.addEventListener("mouseenter", () => highlightProvenance(provenance));
+  element.addEventListener("focus", () => highlightProvenance(provenance));
 }
 
 function markEdited(input, label) {
@@ -342,7 +369,7 @@ function buildExportPayload(kind) {
   }
   const tablesPayload = {
     machine_output: machine.tables || null,
-    user_corrections: pickCorrections("tables."),
+    user_corrections: pickCorrections("tables"),
   };
   return { kind, data: tablesPayload, filename: "tables-result" };
 }

@@ -5,8 +5,11 @@ paths), upload security (size, extension, content), export (JSON/CSV/
 XLSX with read-back), and filename sanitization.
 """
 
+import csv
 import io
 import json
+import zipfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -76,7 +79,8 @@ def mocked_tables(monkeypatch):
         }],
         "warnings": [],
     }
-    monkeypatch.setattr(service, "tables_from_document", lambda source: payload)
+    monkeypatch.setattr(service, "tables_from_document",
+                        lambda source, ocr_items=None: payload)
     return payload
 
 
@@ -274,3 +278,236 @@ class TestExport:
         disposition = response.headers["Content-Disposition"]
         name = disposition.split('filename="')[1].rstrip('"')
         assert "/" not in name and "\\" not in name and " " not in name
+
+
+def _two_table_payload():
+    def table(index):
+        return {
+            "table_id": f"table_{index}", "source_image": "x.png", "rows": 1,
+            "columns": 2,
+            "cells": [
+                {"row_index": 0, "column_index": 0, "text": f"A{index}",
+                 "bounding_box": [], "source_ocr_indices": []},
+                {"row_index": 0, "column_index": 1, "text": f"B{index}",
+                 "bounding_box": [], "source_ocr_indices": []},
+            ],
+            "warnings": [],
+        }
+
+    return {"source_image": "x.png", "tables": [table(0), table(1)], "warnings": []}
+
+
+class TestCorrectionMaterialization:
+    """A1: table corrections must reach CSV/XLSX exports via a validated
+    materialization step; JSON keeps machine output + corrections apart."""
+
+    @staticmethod
+    def _hitl_payload(corrections):
+        machine = {
+            "source_image": "x.png",
+            "tables": [{
+                "table_id": "table_0", "source_image": "x.png", "rows": 2,
+                "columns": 2,
+                "cells": [
+                    {"row_index": 0, "column_index": 0, "text": "Item",
+                     "bounding_box": [], "source_ocr_indices": []},
+                    {"row_index": 0, "column_index": 1, "text": "Qty",
+                     "bounding_box": [], "source_ocr_indices": []},
+                    {"row_index": 1, "column_index": 0, "text": "Coffee",
+                     "bounding_box": [], "source_ocr_indices": []},
+                    {"row_index": 1, "column_index": 1, "text": "3.50",
+                     "bounding_box": [], "source_ocr_indices": []},
+                ],
+                "warnings": [],
+            }],
+            "warnings": [],
+        }
+        return {"machine_output": machine, "user_corrections": corrections}
+
+    def test_csv_uses_corrected_values(self, client):
+        response = client.post("/api/export", json={
+            "kind": "table-csv",
+            "data": self._hitl_payload({"tables[0].cells[1][1]": "4.00"}),
+        })
+        assert response.status_code == 200
+        import csv
+        import io
+
+        rows = list(csv.reader(io.StringIO(response.content.decode("utf-8"))))
+        assert rows[1] == ["Coffee", "4.00"]
+
+    def test_xlsx_uses_corrected_values(self, client):
+        from openpyxl import load_workbook
+
+        response = client.post("/api/export", json={
+            "kind": "table-xlsx",
+            "data": self._hitl_payload({"tables[0].cells[1][1]": "4.00"}),
+        })
+        sheet = load_workbook(io.BytesIO(response.content))["table_0"]
+        assert sheet.cell(row=2, column=2).value == "4.00"
+
+    def test_unedited_values_unchanged_and_machine_untouched(self, client):
+        payload = self._hitl_payload({"tables[0].cells[1][1]": "4.00"})
+        response = client.post("/api/export", json={
+            "kind": "table-json", "data": payload})
+        data = json.loads(response.content)
+        assert data["machine_output"]["tables"][0]["cells"][3]["text"] == "3.50"
+        assert data["user_corrections"] == {"tables[0].cells[1][1]": "4.00"}
+
+    def test_out_of_bounds_correction_422(self, client):
+        response = client.post("/api/export", json={
+            "kind": "table-csv",
+            "data": self._hitl_payload({"tables[0].cells[9][9]": "x"}),
+        })
+        assert response.status_code == 422
+        assert "out of bounds" in response.json()["detail"]
+
+    def test_foreign_path_correction_422(self, client):
+        response = client.post("/api/export", json={
+            "kind": "table-csv",
+            "data": self._hitl_payload({"invoice.total": "1.00"}),
+        })
+        assert response.status_code == 422
+        assert "correction path" in response.json()["detail"]
+
+
+class TestMultiTableExport:
+    """A2: multiple tables -> ZIP of per-table CSVs; one table -> CSV."""
+
+    def test_single_table_returns_csv(self, client):
+        single = {"source_image": "x.png",
+                  "tables": _two_table_payload()["tables"][:1], "warnings": []}
+        response = client.post("/api/export", json={
+            "kind": "table-csv", "data": {"machine_output": single}})
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/csv")
+        assert response.headers["Content-Disposition"].endswith('tables.csv"')
+
+    def test_multiple_tables_return_zip(self, client):
+        response = client.post("/api/export", json={
+            "kind": "table-csv", "data": {"machine_output": _two_table_payload()}})
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/zip"
+        assert response.headers["Content-Disposition"].endswith('tables.zip"')
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = sorted(archive.namelist())
+            assert names == ["tables_t0.csv", "tables_t1.csv"]
+            rows = list(csv.reader(
+                io.StringIO(archive.read("tables_t0.csv").decode("utf-8"))))
+            assert rows[0] == ["A0", "B0"]
+
+    def test_zero_tables_422(self, client):
+        response = client.post("/api/export", json={
+            "kind": "table-csv",
+            "data": {"machine_output": {"source_image": "x", "tables": [],
+                                        "warnings": []}}})
+        assert response.status_code == 422
+
+
+class TestInferenceSafety:
+    """A3: one shared engine, serialized predict(), no duplicate engines,
+    no redundant OCR in unified processing."""
+
+    @pytest.fixture
+    def counting_engine(self, monkeypatch):
+        import threading
+        import time
+
+        from documind.web import service
+
+        class CountingEngine:
+            def __init__(self):
+                self.calls = 0
+                self.max_concurrent = 0
+                self.active = 0
+                self._counter_lock = threading.Lock()
+                self.fail_next = False
+
+            def predict(self, path):
+                with self._counter_lock:
+                    self.calls += 1
+                    self.active += 1
+                    self.max_concurrent = max(self.max_concurrent, self.active)
+                try:
+                    time.sleep(0.05)
+                    if self.fail_next:
+                        self.fail_next = False
+                        raise RuntimeError("transient inference failure")
+                    return [{
+                        "rec_texts": ["ACME STORE", "TOTAL", "13.53"],
+                        "rec_scores": [0.99, 0.99, 0.98],
+                        "rec_polys": [
+                            [[1, 1], [60, 1], [60, 10], [1, 10]],
+                            [[1, 20], [20, 20], [20, 29], [1, 29]],
+                            [[25, 20], [40, 20], [40, 29], [25, 29]],
+                        ],
+                    }]
+                finally:
+                    with self._counter_lock:
+                        self.active -= 1
+
+        engine = CountingEngine()
+        monkeypatch.setattr(service, "_get_engine", lambda: engine)
+        return engine
+
+    def test_concurrent_ocr_serialized(self, counting_engine):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from documind.web import service
+
+        source = Path("whatever.png")  # engine is faked; path unused
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda _: service.ocr_document(source), range(4)))
+        assert counting_engine.calls == 4
+        assert counting_engine.max_concurrent == 1
+
+    def test_unified_auto_avoids_redundant_ocr(self, counting_engine, tmp_path):
+        from documind.web import service
+
+        image = tmp_path / "doc.png"
+        Image.new("RGB", (40, 40), color="white").save(image)
+        service.process_unified(image, ["ocr", "invoice", "table"])
+        assert counting_engine.calls == 1  # tables reuse the OCR items
+
+    def test_table_only_uses_shared_engine_runner(self, counting_engine, tmp_path,
+                                                  monkeypatch):
+        from documind.web import service
+
+        constructed = []
+
+        def forbidden_engine(**kwargs):
+            constructed.append(kwargs)
+            raise AssertionError("table pipeline must not build its own engine")
+
+        # the pipeline imports the engine lazily from its source module
+        monkeypatch.setattr("documind.ocr.engine.PaddleOcrEngine", forbidden_engine)
+        # A ruled grid is required so table detection proceeds to OCR.
+        import cv2
+        import numpy as np
+
+        image_array = np.full((120, 220, 3), 255, dtype=np.uint8)
+        for y in (10, 60, 110):
+            cv2.line(image_array, (10, y), (210, y), (0, 0, 0), 2)
+        for x in (10, 110, 210):
+            cv2.line(image_array, (x, 10), (x, 110), (0, 0, 0), 2)
+        image = tmp_path / "doc.png"
+        cv2.imwrite(str(image), image_array)
+        service.tables_from_document(image)
+        assert counting_engine.calls == 1
+        assert constructed == []
+
+    def test_failed_inference_does_not_poison_engine(self, counting_engine):
+        from documind.web import service
+
+        counting_engine.fail_next = True
+        with pytest.raises(service.DocumentProcessingError):
+            service.ocr_document(Path("whatever.png"))
+        result = service.ocr_document(Path("whatever.png"))
+        assert result["items"][0]["text"] == "ACME STORE"
+        assert counting_engine.calls == 2
+
+    def test_reset_engine_is_safe(self, monkeypatch):
+        from documind.web import service
+
+        service.reset_engine()
+        assert service._engine is None
