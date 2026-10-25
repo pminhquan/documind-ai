@@ -31,6 +31,9 @@ MONEY_FIELDS = frozenset(
     {"subtotal", "tax", "discount", "total", "payment_amount", "change_amount"}
 )
 LINE_ITEM_FIELDS = ("description", "quantity", "unit_price", "line_total")
+# quantity/unit_price/line_total are numeric amounts: compared as Decimal
+# (scale-insensitive), never as strings.
+LINE_ITEM_MONEY_FIELDS = frozenset({"quantity", "unit_price", "line_total"})
 
 MATCHED = "matched"
 MISSING = "missing"
@@ -62,13 +65,17 @@ def _canonical_date(value) -> str | None:
         return str(value)
 
 
-def _canonical_money(value) -> str | None:
-    if value is None:
-        return None
+def _finite_decimal(value) -> Decimal | None:
+    """Parse a finite Decimal, or None for unparseable / non-finite values.
+
+    NaN and Infinity are rejected explicitly: a non-finite amount is
+    invalid and can never equal anything (including another NaN).
+    """
     try:
-        return str(Decimal(str(value)))
+        number = Decimal(str(value))
     except InvalidOperation:
-        return f"<unparseable:{value}>"
+        return None
+    return number if number.is_finite() else None
 
 
 def _canonical_text(value, casefold: bool) -> str | None:
@@ -103,6 +110,45 @@ def _compare_scalar(field_name, expected, predicted) -> FieldOutcome:
     return FieldOutcome(status, expected, predicted)
 
 
+def _compare_amount(expected, predicted) -> FieldOutcome:
+    """Numeric amount comparison with explicit null/invalid handling.
+
+    Null handling mirrors scalar fields; unparseable or non-finite
+    values (NaN, Infinity) are invalid and never equal anything.
+    """
+    if expected is None and predicted is None:
+        return FieldOutcome(TRUE_NEGATIVE, None, None)
+    if expected is not None and predicted is None:
+        return FieldOutcome(MISSING, expected, None)
+    if expected is None and predicted is not None:
+        return FieldOutcome(EXTRA, None, predicted)
+    expected_number = _finite_decimal(expected)
+    predicted_number = _finite_decimal(predicted)
+    if expected_number is None or predicted_number is None:
+        return FieldOutcome(INCORRECT, expected, predicted)
+    status = MATCHED if expected_number == predicted_number else INCORRECT
+    return FieldOutcome(status, expected, predicted)
+
+
+def _prf(true_positives: int, false_positives: int, false_negatives: int) -> dict:
+    """Item-level precision/recall/F1 (None when nothing is measurable)."""
+    precision = (
+        true_positives / (true_positives + false_positives)
+        if true_positives + false_positives else None
+    )
+    recall = (
+        true_positives / (true_positives + false_negatives)
+        if true_positives + false_negatives else None
+    )
+    if precision is None or recall is None:
+        f1 = None
+    elif precision + recall == 0:
+        f1 = 0.0
+    else:
+        f1 = 2 * precision * recall / (precision + recall)
+    return {"item_precision": precision, "item_recall": recall, "item_f1": f1}
+
+
 def _compare_line_items(expected_items, predicted_items) -> dict:
     expected_items = expected_items or []
     predicted_items = predicted_items or []
@@ -130,6 +176,8 @@ def _compare_line_items(expected_items, predicted_items) -> dict:
                 outcome = _compare_scalar(
                     "description", expected_value, predicted_value
                 )
+            elif item_field in LINE_ITEM_MONEY_FIELDS:
+                outcome = _compare_amount(expected_value, predicted_value)
             else:
                 outcome = _compare_scalar(
                     item_field,
@@ -150,14 +198,27 @@ def _compare_line_items(expected_items, predicted_items) -> dict:
                               MATCHED if item_match else INCORRECT,
                               "fields": fields})
 
+    true_positives = matched_items
+    false_negatives = sum(1 for o in item_outcomes if o["status"] == MISSING)
+    false_positives = sum(1 for o in item_outcomes if o["status"] == EXTRA)
+    item_metrics = _prf(true_positives, false_positives, false_negatives)
+
     return {
         "expected_items": len(expected_items),
         "predicted_items": len(predicted_items),
         "items_matched": matched_items,
+        "item_field_accuracy": (
+            field_correct / field_total if field_total else None
+        ),
+        "item_field_accuracy_scope": (
+            "field correctness among matched item pairs; item-level "
+            "precision/recall/F1 reflect missing and extra items"
+        ),
         "item_field_correct": field_correct,
         "item_field_total": field_total,
-        "missing_items": sum(1 for o in item_outcomes if o["status"] == MISSING),
-        "extra_items": sum(1 for o in item_outcomes if o["status"] == EXTRA),
+        "missing_items": false_negatives,
+        "extra_items": false_positives,
+        **item_metrics,
         "items": item_outcomes,
         "matching_assumption": "index-based (reading order preserved)",
     }
@@ -225,7 +286,7 @@ def evaluate_manifest(manifest) -> dict:
     total_matched = total_applicable = 0
     accuracies: list[float] = []
     item_field_correct = item_field_total = 0
-    tables_missing_items = tables_extra_items = 0
+    total_tp = total_fp = total_fn = 0
 
     for entry in manifest.entries:
         outcome = evaluate_document(entry.prediction, entry.ground_truth)
@@ -238,8 +299,9 @@ def evaluate_manifest(manifest) -> dict:
         line_items = outcome["line_items"]
         item_field_correct += line_items["item_field_correct"]
         item_field_total += line_items["item_field_total"]
-        tables_missing_items += line_items["missing_items"]
-        tables_extra_items += line_items["extra_items"]
+        total_tp += line_items["items_matched"]
+        total_fp += line_items["extra_items"]
+        total_fn += line_items["missing_items"]
 
     macro = (sum(accuracies) / len(accuracies)) if accuracies else None
     micro = (total_matched / total_applicable) if total_applicable else None
@@ -256,8 +318,9 @@ def evaluate_manifest(manifest) -> dict:
             ),
             "item_field_correct": item_field_correct,
             "item_field_total": item_field_total,
-            "missing_line_items": tables_missing_items,
-            "extra_line_items": tables_extra_items,
+            "missing_line_items": total_fn,
+            "extra_line_items": total_fp,
+            **_prf(total_tp, total_fp, total_fn),
         },
         "conventions": {
             "null_handling": (

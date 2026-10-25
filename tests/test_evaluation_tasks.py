@@ -146,6 +146,88 @@ class TestInvoiceEvaluation:
         assert summary["aggregate"]["micro_field_accuracy"] is None
 
 
+class TestItemMetricCorrectness:
+    """Regression: line-item quantity/unit_price/line_total were compared
+    as strings (so "2.50" != "2.5"), and missing items never lowered the
+    reported item score."""
+
+    def predicted_items(self, items):
+        return {**FULL_INVOICE, "line_items": items}
+
+    def test_scale_insensitive_item_amounts_match(self, tmp_path):
+        predicted = self.predicted_items([
+            {"description": "SOAP", "quantity": "2.0", "unit_price": "2.5",
+             "line_total": "5.0"},
+            {"description": "MILK 1L", "quantity": "1", "unit_price": "2.50",
+             "line_total": "2.50"},
+        ])
+        entry = invoice_entry(tmp_path, "doc", FULL_INVOICE, predicted)
+        summary = eval_invoices(type("M", (), {"entries": [entry]})())
+        doc = summary["documents"][0]
+        assert doc["line_items"]["items_matched"] == 2
+        assert doc["line_items"]["item_field_accuracy"] == 1.0
+
+    def test_different_item_amount_is_incorrect(self, tmp_path):
+        predicted = self.predicted_items([
+            {"description": "SOAP", "quantity": "3", "unit_price": "2.50",
+             "line_total": "5.00"},
+            FULL_INVOICE["line_items"][1],
+        ])
+        entry = invoice_entry(tmp_path, "doc", FULL_INVOICE, predicted)
+        doc = eval_invoices(type("M", (), {"entries": [entry]})())["documents"][0]
+        fields = doc["line_items"]["items"][0]["fields"]
+        assert fields["quantity"]["status"] == "incorrect"
+        assert doc["line_items"]["items_matched"] == 1
+
+    def test_invalid_and_nonfinite_item_values_never_match(self, tmp_path):
+        predicted = self.predicted_items([
+            {"description": "SOAP", "quantity": "abc", "unit_price": "NaN",
+             "line_total": "Infinity"},
+            FULL_INVOICE["line_items"][1],
+        ])
+        entry = invoice_entry(tmp_path, "doc", FULL_INVOICE, predicted)
+        doc = eval_invoices(type("M", (), {"entries": [entry]})())["documents"][0]
+        fields = doc["line_items"]["items"][0]["fields"]
+        assert fields["quantity"]["status"] == "incorrect"
+        assert fields["unit_price"]["status"] == "incorrect"
+        assert fields["line_total"]["status"] == "incorrect"
+
+    def test_missing_item_shown_by_precision_recall_f1(self, tmp_path):
+        # Only the first of two expected items is predicted (perfectly).
+        predicted = self.predicted_items([FULL_INVOICE["line_items"][0]])
+        entry = invoice_entry(tmp_path, "doc", FULL_INVOICE, predicted)
+        summary = eval_invoices(type("M", (), {"entries": [entry]})())
+        line_items = summary["documents"][0]["line_items"]
+        assert line_items["item_field_accuracy"] == 1.0  # among matched pairs
+        assert line_items["item_precision"] == 1.0
+        assert line_items["item_recall"] == 0.5
+        assert line_items["item_f1"] == pytest.approx(2 * 0.5 * 1.0 / 1.5)
+        assert line_items["missing_items"] == 1
+        assert summary["aggregate"]["item_recall"] == 0.5
+
+    def test_extra_item_lowers_precision(self, tmp_path):
+        predicted = self.predicted_items(
+            FULL_INVOICE["line_items"]
+            + [{"description": "GUM", "quantity": "1", "unit_price": "0.50",
+                "line_total": "0.50"}]
+        )
+        entry = invoice_entry(tmp_path, "doc", FULL_INVOICE, predicted)
+        line_items = eval_invoices(type("M", (), {"entries": [entry]})())["documents"][0]["line_items"]
+        assert line_items["item_precision"] == pytest.approx(2 / 3)
+        assert line_items["item_recall"] == 1.0
+
+    def test_no_items_on_both_sides_gives_none_metrics(self, tmp_path):
+        predicted = {**FULL_INVOICE, "line_items": []}
+        entry = invoice_entry(
+            tmp_path, "doc",
+            {**FULL_INVOICE, "line_items": []}, predicted,
+        )
+        line_items = eval_invoices(type("M", (), {"entries": [entry]})())["documents"][0]["line_items"]
+        assert line_items["item_precision"] is None
+        assert line_items["item_recall"] is None
+        assert line_items["item_f1"] is None
+
+
 class TestTableEvaluation:
     @staticmethod
     def truth(rows, columns, cells):
