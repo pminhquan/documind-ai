@@ -114,6 +114,70 @@ class TestDateFormats:
         assert extract(document).invoice.invoice_date is None
 
 
+class TestValidationSemantics:
+    """Regression: completeness and arithmetic consistency are judged
+    separately. An empty or identification-less document must never be
+    reported as plain 'ok'.
+
+    Sufficiently complete (M2 baseline) = at least one monetary anchor
+    (grand total, subtotal, or a line item with a line_total) AND at
+    least one identification field (supplier, invoice number, or date).
+    Optional fields (tax, discount, payment, change) never affect this.
+    """
+
+    def test_empty_ocr_is_review_required(self):
+        result = extract({"items": []})
+        invoice = result.invoice
+        assert invoice.validation_status == STATUS_REVIEW
+        assert any("incomplete" in e for e in invoice.validation_errors)
+
+    def test_total_only_is_review_required(self):
+        document = {"items": [{"text": "TOTAL 9.57", "box": []}]}
+        result = extract(document)
+        assert result.invoice.total == Decimal("9.57")
+        assert result.invoice.validation_status == STATUS_REVIEW
+        assert any("incomplete" in e for e in result.invoice.validation_errors)
+
+    def test_supplier_plus_total_is_ok(self):
+        result = extract(load_fixture("missing_fields.json"))
+        assert result.invoice.validation_status == STATUS_OK
+
+    def test_fully_valid_invoice_is_ok(self):
+        result = extract(load_fixture("normal_receipt.json"))
+        assert result.invoice.validation_status == STATUS_OK
+
+    def test_missing_optional_fields_do_not_affect_status(self):
+        # discounts fixture has no payment/change/line items at all
+        result = extract(load_fixture("discounts.json"))
+        assert result.invoice.payment_amount is None
+        assert result.invoice.change_amount is None
+        assert result.invoice.validation_status == STATUS_OK
+
+    def test_partial_line_totals_do_not_report_subtotal_error(self):
+        # SOAP has no printed line total; the old subtotal check summed
+        # only the present totals and falsely flagged a mismatch.
+        document = {"items": [
+            {"text": "MINI MART", "box": [[0, 0], [60, 0], [60, 20], [0, 20]]},
+            {"text": "ITEM QTY x PRICE",
+             "box": [[0, 30], [110, 30], [110, 50], [0, 50]]},
+            {"text": "SOAP", "box": [[0, 60], [40, 60], [40, 80], [0, 80]]},
+            {"text": "2 x 2.50", "box": [[50, 60], [110, 60], [110, 80], [50, 80]]},
+            {"text": "MILK", "box": [[0, 90], [40, 90], [40, 110], [0, 110]]},
+            {"text": "1 x 2.50", "box": [[50, 90], [110, 90], [110, 110], [50, 110]]},
+            {"text": "2.50", "box": [[120, 90], [160, 90], [160, 110], [120, 110]]},
+            {"text": "SUBTOTAL", "box": [[0, 130], [60, 130], [60, 150], [0, 150]]},
+            {"text": "5.00", "box": [[120, 130], [160, 130], [160, 150], [120, 150]]},
+            {"text": "TOTAL", "box": [[0, 160], [50, 160], [50, 180], [0, 180]]},
+            {"text": "5.00", "box": [[120, 160], [160, 160], [160, 180], [120, 180]]},
+        ]}
+        result = extract(document)
+        invoice = result.invoice
+        assert len(invoice.line_items) == 2
+        assert invoice.line_items[0].line_total is None
+        assert not any("subtotal" in e for e in invoice.validation_errors)
+        assert invoice.validation_status == STATUS_OK
+
+
 class TestMonetaryRegression:
     """Regression: MONEY_TOKEN_RE capped ungrouped integers at 1-3 digits,
     so the re.search fallback extracted only a substring of larger amounts
@@ -263,7 +327,10 @@ class TestEdgeCases:
         assert invoice.supplier is None
         assert invoice.line_items == []
         assert invoice.total is None
-        assert invoice.validation_status == STATUS_OK
+        # Completeness and arithmetic are judged separately: an empty
+        # document has no inconsistency but is not "ok" either.
+        assert invoice.validation_status == STATUS_REVIEW
+        assert any("incomplete" in e for e in invoice.validation_errors)
 
     def test_malformed_json_rejected(self):
         with pytest.raises(OcrInputError, match="Malformed JSON"):
