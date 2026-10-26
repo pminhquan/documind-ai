@@ -14,8 +14,9 @@ prefer completing PR B (web app) correctly over partially doing B–E.
 - [x] Phase 0 — repository audit and baseline (main @ 7e7621f post PR #5, 223 tests green)
 - [x] Phase 1 / PR A — quality foundations + agent skills (this PR)
 - [x] Phase 2 / PR B — M5A: local FastAPI backend + web frontend
-- [ ] Phase 3 / PR C — M5B: PDF input, batch processing, richer exports
-- [ ] Phase 4 / PR D — M5C: extraction robustness + Vietnamese labels/i18n
+- [x] Phase 3 / PR C — M5B: PDF input, batch processing, richer exports
+- [ ] Phase 4 / PR D — M5C: extraction robustness + Vietnamese labels/i18n (pending — next stacked PR; design notes: label lexicon separated from parsing, VND symbols, no metric redefinitions)
+- [ ] Phase 5 / PR E — performance profiling + release polish (pending — benchmark script + cold/warm inference measurement first)
 - [ ] Phase 5 / PR E — performance profiling + release polish
 
 ## PR A — Quality foundations (done)
@@ -67,6 +68,26 @@ each with regression tests and no metric redefinitions.
 Measured baselines (cold init, warm inference, per-image time) before
 any optimization; engine reuse in batch; documented methodology; then
 screenshots/demo walkthrough and release checklist. No invented numbers.
+
+## Stage 0 (P0 repair) — done on PR #8 branch
+
+- [x] 0.1 CRITICAL: app.js had a top-level `return` (orphaned batch-zip
+      block) — the whole frontend script failed to load. Fixed; batch
+      export now also excludes failed documents explicitly
+      (`batch-errors.json`). Regression gate added:
+      `scripts/check_browser_js.py` EXECUTES app.js under Node with DOM
+      stubs (catches runtime load errors that `node --check` misses);
+      wired into verify.py + pytest (`tests/test_frontend_gate.py`).
+- [ ] 0.2 frontend state consistency across files/pages — PENDING (next unit)
+- [ ] 0.3 pdf.py preflight dimension check before bitmap allocation — PENDING
+- [ ] 0.4 export hardening sweep — partially covered by earlier tests; full audit PENDING
+
+## Resume instructions (context exhausted 2026-10-25)
+
+1. `git checkout feat/m5b-pdf-batch-exports` (head after Stage 0.1 fix).
+2. Do Stage 0.2–0.4 (see PR #8 review findings), then Stages D–H per the
+   original mission; each is a stacked branch off the previous head.
+3. Keep the frontend gate green: `python scripts/check_browser_js.py`.
 
 ## Known issues at audit time
 

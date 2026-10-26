@@ -32,7 +32,7 @@ documind-web
 | POST | `/api/ocr` | multipart `upload` (image) | `OcrResponse` |
 | POST | `/api/invoice` | multipart `upload` | `InvoiceResponse` (runs OCR internally) |
 | POST | `/api/table` | multipart `upload` | `TableResponse` (ruled tables only) |
-| POST | `/api/process` | multipart `upload` + `workflow` = `auto\|ocr\|invoice\|table` | `UnifiedResponse` |
+| POST | `/api/process` | multipart `upload` (image **or PDF**) + `workflow` | `UnifiedResponse` (image) or multi-page PDF result |
 | POST | `/api/export` | JSON `{kind, data, filename?}` | file download |
 
 `OcrResponse` = `{source, engine, items: [{text, confidence, box}],
@@ -46,10 +46,30 @@ per region (line grouping happens inside extraction).
 `TableResponse` = `{source_image, tables, warnings}` — same schema as
 `documind-table` output.
 
-Export `kind`: `ocr-json`, `invoice-json`, `table-json` (JSON pass-through
-— human-in-the-loop payloads keep `machine_output` and `user_corrections`
-separate), `table-csv`, `table-xlsx`. Unknown kind → 422; table export
-with no tables → 422.
+Export `kind`: `ocr-json`, `ocr-txt`, `invoice-json`, `invoice-csv`,
+`invoice-xlsx`, `table-json`, `table-csv`, `table-xlsx`, `batch-zip`.
+Unknown kind → 422; table export with no tables → 422. Invoice
+CSV/XLSX materialize `user_corrections` (validated client paths) into a
+fresh copy; formula-injection policy re-applied.
+
+### PDF input (M5B)
+
+`/api/process` accepts PDFs (detected by `%PDF` magic). Pages render via
+pypdfium2 at ~144 DPI with bounds: **10 pages max**, 30 MP per page —
+violations return 400. Results are page-indexed
+(`{kind: "pdf", page_count, pages: [{page_index, ocr, invoice, tables}],
+errors}`); a failing page is recorded in `errors` while others still
+process (partial success). The single-page extractor does not infer
+cross-page relationships — per-page results are intentionally separate.
+Page images live in a temp directory removed after processing.
+
+### Batch processing (M5B, client-orchestrated)
+
+The UI processes up to **10 files per batch run sequentially** (one
+document in memory at a time), showing per-file status with error
+isolation, partial success, and a Stop button. Batch results export via
+`batch-zip` (≤ 10 entries, sanitized deduplicated names, per-entry kind
+validation). No job queues or databases.
 
 ### Corrections materialization (CSV/XLSX)
 

@@ -2,13 +2,18 @@
 "use strict";
 
 const state = {
-  file: null,
+  files: [],         // batch queue (1..10 documents)
   imageUrl: null,
   naturalWidth: 0,
   naturalHeight: 0,
-  machine: null,     // untouched model output (ocr/invoice/tables)
-  corrections: {},   // user corrections, keyed by field path
+  machine: null,     // untouched model output for the active document/page
+  activeDocKey: null, // "filename#pageLabel" — corrections never leak across docs/pages
+  correctionsByDoc: {}, // { docKey: { fieldPath: value } }
+  cancelled: false,
+  batchResults: [],  // per-file results in batch mode
 };
+const MAX_BATCH_FILES = 10;
+const WORKFLOW_EXPORT_KIND = { ocr: "ocr-json", invoice: "invoice-json", table: "table-json" };
 
 const $ = (id) => document.getElementById(id);
 
@@ -18,7 +23,8 @@ const fileInput = $("file-input");
 const dropZone = $("drop-zone");
 
 fileInput.addEventListener("change", () => {
-  if (fileInput.files.length) loadFile(fileInput.files[0]);
+  const files = Array.from(fileInput.files).slice(0, MAX_BATCH_FILES);
+  if (files.length) loadFile(files[0], files);
 });
 
 dropZone.addEventListener("dragover", (event) => {
@@ -29,7 +35,8 @@ dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover
 dropZone.addEventListener("drop", (event) => {
   event.preventDefault();
   dropZone.classList.remove("dragover");
-  if (event.dataTransfer.files.length) loadFile(event.dataTransfer.files[0]);
+  const files = Array.from(event.dataTransfer.files).slice(0, MAX_BATCH_FILES);
+  if (files.length) loadFile(files[0], files);
 });
 dropZone.addEventListener("keydown", (event) => {
   if (event.key === "Enter" || event.key === " ") {
@@ -38,18 +45,21 @@ dropZone.addEventListener("keydown", (event) => {
   }
 });
 
-function loadFile(file) {
-  if (!/\.(png|jpe?g|bmp|tiff?|webp)$/i.test(file.name)) {
-    setStatus("Unsupported file type. Use PNG, JPG, BMP, TIFF or WEBP.", true);
+function loadFile(file, allFiles) {
+  if (!/\.(png|jpe?g|bmp|tiff?|webp|pdf)$/i.test(file.name)) {
+    setStatus("Unsupported file type. Use PNG, JPG, BMP, TIFF, WEBP or PDF.", true);
     return;
   }
   if (file.size > 10 * 1024 * 1024) {
     setStatus("File exceeds the 10 MB limit.", true);
     return;
   }
+  state.files = allFiles && allFiles.length > 1 ? allFiles : [file];
   state.file = file;
   state.machine = null;
-  state.corrections = {};
+  state.correctionsByDoc = {};     // new selection: drop stale edits
+  state.activeDocKey = `${file.name}#0`;
+  state.batchResults = [];
   if (state.imageUrl) URL.revokeObjectURL(state.imageUrl);
   state.imageUrl = URL.createObjectURL(file);
 
@@ -59,6 +69,13 @@ function loadFile(file) {
     state.naturalHeight = img.naturalHeight;
   };
   img.src = state.imageUrl;
+  if (/\.pdf$/i.test(file.name)) {
+    $("preview-img").removeAttribute("src");
+    $("preview-container").classList.add("hidden");
+    setStatus(`${file.name} loaded. PDF preview is not rendered; run to process.`);
+  } else {
+    $("preview-container").classList.remove("hidden");
+  }
   $("preview-wrap").classList.remove("hidden");
   $("results").classList.add("hidden");
   clearOverlay();
@@ -78,33 +95,116 @@ $("run-btn").addEventListener("click", async () => {
   if (!state.file) return;
   const workflow = $("workflow").value;
   $("run-btn").disabled = true;
-  setStatus("Processing… (first run may download OCR models)");
+  $("stop-btn").classList.remove("hidden");
+  state.cancelled = false;
+  const batchList = $("batch-status");
+  batchList.innerHTML = "";
+  batchList.classList.toggle("hidden", state.files.length <= 1);
   try {
-    const form = new FormData();
-    form.append("upload", state.file, state.file.name);
-    form.append("workflow", workflow);
-    const response = await fetch("/api/process", { method: "POST", body: form });
-    if (!response.ok) {
-      const detail = await response.json().catch(() => ({}));
-      throw new Error(detail.detail || `HTTP ${response.status}`);
+    for (let index = 0; index < state.files.length; index += 1) {
+      if (state.cancelled) {
+        setStatus(`Stopped after ${index} of ${state.files.length} document(s).`, true);
+        return;
+      }
+      const file = state.files[index];
+      const entry = document.createElement("li");
+      entry.textContent = `${file.name}: processing...`;
+      batchList.appendChild(entry);
+      setStatus(`Processing ${index + 1}/${state.files.length}: ${file.name}`);
+      try {
+        const form = new FormData();
+        form.append("upload", file, file.name);
+        form.append("workflow", workflow);
+        const response = await fetch("/api/process", { method: "POST", body: form });
+        if (!response.ok) {
+          const detail = await response.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${response.status}`);
+        }
+        const result = await response.json();
+        state.machine = result;
+        state.activeDocKey = `${file.name}#0`;  // fresh machine output
+        state.batchResults.push({
+          filename: file.name,
+          kind: exportKindFor(workflow, result),
+          data: exportDataFor(workflow, result),
+        });
+        entry.textContent = `${file.name}: ok`;
+        renderResults(workflow);
+      } catch (fileError) {
+        entry.textContent = `${file.name}: FAILED - ${fileError.message}`;
+        state.batchResults.push({ filename: file.name, kind: "ocr-json",
+                                  data: {}, error: fileError.message });
+      }
     }
-    state.machine = await response.json();
-    state.corrections = {};
-    renderResults(workflow);
-    setStatus("Done. Machine output shown — edit fields to add corrections.");
-  } catch (error) {
-    setStatus(`Error: ${error.message}`, true);
+    const ok = state.batchResults.filter((r) => !r.error).length;
+    setStatus(`Done (${ok}/${state.batchResults.length} succeeded). ` +
+              "Machine output shown - edit fields to add corrections.");
   } finally {
     $("run-btn").disabled = false;
+    $("stop-btn").classList.add("hidden");
   }
 });
 
-function renderResults(workflow) {
-  const data = state.machine;
+$("stop-btn").addEventListener("click", () => {
+  state.cancelled = true;
+  setStatus("Stopping after the current document...");
+});
+
+function exportKindFor(workflow, result) {
+  if (result.kind === "pdf") return "ocr-json";
+  return WORKFLOW_EXPORT_KIND[workflow] || "ocr-json";
+}
+
+function exportDataFor(workflow, result) {
+  if (result.kind === "pdf") {
+    return { pages: result.pages.map((page) => ({
+      page_index: page.page_index, ocr: page.ocr || null })) };
+  }
+  if (workflow === "ocr") return result.ocr || {};
+  if (workflow === "invoice") return { machine_output: result.invoice || null };
+  return { machine_output: result.tables || null };
+}
+
+function renderPdf(data) {
+  const nav = $("pages-nav");
+  nav.innerHTML = "";
+  nav.classList.remove("hidden");
+  data.pages.forEach((page, index) => {
+    if (page.error) return;
+    const tab = document.createElement("button");
+    tab.className = "tab";
+    tab.textContent = `Page ${page.page_index + 1}`;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", index === 0 ? "true" : "false");
+    tab.addEventListener("click", () => {
+      nav.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", "false"));
+      tab.setAttribute("aria-selected", "true");
+      // page switch: point corrections at this page and drop stale boxes
+      state.activeDocKey = `${state.file.name}#${page.page_index}`;
+      clearOverlay();
+      renderResults(data.workflows, page);
+    });
+    nav.appendChild(tab);
+  });
+  const first = data.pages.find((page) => !page.error);
+  if (first) {
+    state.activeDocKey = `${state.file.name}#${first.page_index}`;
+    clearOverlay();
+    renderResults(data.workflows, first);
+  }
+}
+
+function renderResults(workflow, pageOverride) {
+  const data = pageOverride || state.machine;
+  if (data.kind === "pdf") {
+    renderPdf(data);
+    return;
+  }
   $("results").classList.remove("hidden");
   $("ocr-panel").classList.toggle("hidden", !data.ocr);
   $("invoice-panel").classList.toggle("hidden", !data.invoice);
   $("tables-panel").classList.toggle("hidden", !data.tables);
+  if (!data.ocr) clearOverlay();  // no OCR on this page: old boxes must not linger
   if (data.ocr) renderOcr(data.ocr);
   if (data.invoice) renderInvoice(data.invoice);
   if (data.tables) renderTables(data.tables);
@@ -218,7 +318,24 @@ function renderInvoice(invoice) {
 }
 
 function recordCorrection(path, value) {
-  state.corrections[path] = value;
+  if (!state.activeDocKey) return;
+  if (!state.correctionsByDoc[state.activeDocKey]) {
+    state.correctionsByDoc[state.activeDocKey] = {};
+  }
+  state.correctionsByDoc[state.activeDocKey][path] = value;
+  updateCorrectionCount();
+}
+
+function activeCorrections() {
+  return state.correctionsByDoc[state.activeDocKey] || {};
+}
+
+function updateCorrectionCount() {
+  const count = Object.keys(activeCorrections()).length;
+  const status = $("status");
+  if (status && count && !status.classList.contains("error")) {
+    status.textContent = `${count} unsaved correction(s) on ${state.activeDocKey}`;
+  }
 }
 
 function highlightProvenance(provenance) {
@@ -256,13 +373,21 @@ function markEdited(input, label) {
 }
 
 $("invoice-reset").addEventListener("click", () => {
-  state.corrections = Object.fromEntries(
-    Object.entries(state.corrections).filter(([key]) => !key.startsWith("invoice.")));
+  const key = state.activeDocKey;
+  if (key && state.correctionsByDoc[key]) {
+    state.correctionsByDoc[key] = Object.fromEntries(
+      Object.entries(state.correctionsByDoc[key])
+        .filter(([path]) => !path.startsWith("invoice.")));
+  }
   renderInvoice(state.machine.invoice);
 });
 $("tables-reset").addEventListener("click", () => {
-  state.corrections = Object.fromEntries(
-    Object.entries(state.corrections).filter(([key]) => !key.startsWith("tables.")));
+  const key = state.activeDocKey;
+  if (key && state.correctionsByDoc[key]) {
+    state.correctionsByDoc[key] = Object.fromEntries(
+      Object.entries(state.correctionsByDoc[key])
+        .filter(([path]) => !path.startsWith("tables")));
+  }
   renderTables(state.machine.tables);
 });
 
@@ -357,6 +482,9 @@ function buildExportPayload(kind) {
   if (kind === "ocr-json") {
     return { kind, data: machine.ocr || {}, filename: "ocr-result.json" };
   }
+  if (kind === "ocr-txt") {
+    return { kind, data: machine.ocr || {}, filename: "ocr-result.txt" };
+  }
   if (kind === "invoice-json") {
     return {
       kind,
@@ -367,6 +495,28 @@ function buildExportPayload(kind) {
       filename: "invoice-result.json",
     };
   }
+  if (kind === "batch-zip") {
+    // Success-only file list; failures are exported explicitly as an
+    // error report instead of silently becoming fake OCR results.
+    const succeeded = state.batchResults.filter((result) => !result.error);
+    const failed = state.batchResults.filter((result) => result.error);
+    const files = succeeded.map((result, index) => {
+      const stem = (result.filename || `doc_${index}`).replace(/\.[^.]+$/, "");
+      const extension = result.kind.split("-")[1] === "json" ? "json"
+        : result.kind.split("-")[1];
+      return { kind: result.kind, filename: `${stem}.${extension}`,
+               data: result.data };
+    });
+    if (failed.length) {
+      files.push({
+        kind: "ocr-json",
+        filename: "batch-errors.json",
+        data: { failed_documents: failed.map((result) => ({
+          filename: result.filename, error: result.error })) },
+      });
+    }
+    return { kind, data: { files }, filename: "batch-exports.zip" };
+  }
   const tablesPayload = {
     machine_output: machine.tables || null,
     user_corrections: pickCorrections("tables"),
@@ -376,7 +526,7 @@ function buildExportPayload(kind) {
 
 function pickCorrections(prefix) {
   const picked = {};
-  Object.entries(state.corrections).forEach(([key, value]) => {
+  Object.entries(activeCorrections()).forEach(([key, value]) => {
     if (key.startsWith(prefix)) picked[key.slice(prefix.length)] = value;
   });
   return picked;

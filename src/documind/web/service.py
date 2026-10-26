@@ -113,3 +113,38 @@ def process_unified(source: Path, workflows: list[str]) -> dict:
     if "table" in workflows:
         result["tables"] = tables_from_document(source, ocr_items=ocr_result)
     return result
+
+
+def process_pdf(content: bytes, workflows: list[str], output_dir: Path,
+                max_pages: int = 10) -> dict:
+    """Process a multi-page PDF page by page.
+
+    The single-page invoice extractor does not understand cross-page
+    relationships, so every workflow runs per page and results stay
+    page-indexed. A page that fails is recorded in ``errors`` while other
+    pages still produce results (partial success).
+    """
+    from .pdf import PdfError, render_pdf_pages
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        page_images = render_pdf_pages(content, output_dir, max_pages=max_pages)
+    except PdfError as exc:
+        raise DocumentProcessingError(str(exc)) from exc
+
+    pages: list[dict] = []
+    errors: list[str] = []
+    for page_index, page_path in enumerate(page_images):
+        try:
+            pages.append({
+                "page_index": page_index,
+                "source": str(page_path),
+                **process_unified(page_path, workflows),
+            })
+        except DocumentProcessingError as exc:
+            errors.append(f"page {page_index}: {exc}")
+            pages.append({"page_index": page_index, "error": str(exc)})
+        finally:
+            page_path.unlink(missing_ok=True)
+    return {"kind": "pdf", "page_count": len(page_images),
+            "workflows": workflows, "pages": pages, "errors": errors}

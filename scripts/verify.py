@@ -12,6 +12,7 @@ import sys
 
 STEPS = [
     ("ruff", [sys.executable, "-m", "ruff", "check", "src", "tests", "scripts"]),
+    ("frontend-gate", [sys.executable, "scripts/check_browser_js.py"]),
     ("pytest", [sys.executable, "-m", "pytest", "-q"]),
 ]
 

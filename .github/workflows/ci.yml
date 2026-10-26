@@ -21,13 +21,20 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install minimal test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pillow openpyxl opencv-python-headless ruff fastapi httpx python-multipart
+          pip install pytest pillow openpyxl opencv-python-headless ruff fastapi httpx python-multipart pypdfium2
 
       - name: Lint (ruff)
         run: ruff check src tests scripts
+
+      - name: Browser-script regression gate (must not skip)
+        run: python scripts/check_browser_js.py
 
       - name: Run tests
         run: pytest

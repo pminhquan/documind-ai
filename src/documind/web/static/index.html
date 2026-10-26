@@ -19,10 +19,10 @@
            aria-label="Choose or drop an image file">
         <p>Drag &amp; drop an image here, or</p>
         <label class="button">
-          <input type="file" id="file-input" accept=".png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp">
+          <input type="file" id="file-input" multiple accept=".png,.jpg,.jpeg,.bmp,.tif,.tiff,.webp,.pdf">
           Choose file
         </label>
-        <p class="hint">PNG, JPG, BMP, TIFF, WEBP — max 10 MB</p>
+        <p class="hint">PNG, JPG, BMP, TIFF, WEBP, PDF — max 10 MB each, up to 10 files per batch</p>
       </div>
 
       <div id="preview-wrap" class="preview-wrap hidden">
@@ -43,8 +43,11 @@
           <option value="table">Table recognition</option>
         </select>
         <button id="run-btn" class="button primary" disabled>Run</button>
+        <button id="stop-btn" class="button hidden">Stop</button>
       </div>
+      <ul id="batch-status" class="ocr-list hidden"></ul>
       <p id="status" class="status" role="status" aria-live="polite"></p>
+      <div id="pages-nav" class="tabs hidden" role="tablist" aria-label="PDF pages"></div>
     </section>
 
     <section id="results" class="panel hidden" aria-labelledby="results-heading">
@@ -55,6 +58,7 @@
         <ul id="ocr-list" class="ocr-list"></ul>
         <div class="export-row">
           <button class="button" data-export="ocr-json">Export OCR JSON</button>
+          <button class="button" data-export="ocr-txt">Export OCR TXT</button>
         </div>
       </div>
 
@@ -72,6 +76,8 @@
         </table>
         <div class="export-row">
           <button class="button" data-export="invoice-json">Export JSON</button>
+          <button class="button" data-export="invoice-csv">Export CSV</button>
+          <button class="button" data-export="invoice-xlsx">Export XLSX</button>
           <button class="button" id="invoice-reset">Reset corrections</button>
         </div>
       </div>
