@@ -61,8 +61,11 @@ export payloads (non-object tables/cells, non-integer or boolean
 dimensions/coordinates, negative or out-of-bounds coordinates, missing
 required cell fields, unknown cell fields, non-list warnings) are
 rejected with 422 and stable detail messages — never an uncontrolled
-500. JSON exports pass through untouched by design; the materializing
-paths (CSV/XLSX, invoice and table corrections) validate before use.
+500. Zero dimensions (`rows: 0` / `columns: 0`) stay tolerated for
+export compatibility and produce empty artifacts; the recognition
+pipeline itself always emits at least 1×1. JSON exports pass through
+untouched by design; the materializing paths (CSV/XLSX, invoice and
+table corrections) validate before use.
 Invoice
 CSV/XLSX materialize `user_corrections` (validated client paths) into a
 fresh copy; formula-injection policy re-applied.

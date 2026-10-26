@@ -643,6 +643,19 @@ class TestTableExportPayloadValidation:
         assert len(workbook.sheetnames) == 2
         assert len({name.casefold() for name in workbook.sheetnames}) == 2
 
+    def test_xlsx_control_char_table_id_exports_valid_workbook(
+            self, client, valid_table):
+        """Control characters are representable in JSON and previously
+        produced a corrupt xl/workbook.xml (openpyxl saves silently);
+        the sanitized title must yield a strict-parseable artifact."""
+        import xml.etree.ElementTree as ET
+        payload = _tables_payload({**valid_table, "table_id": "bad\x00title"})
+        response = client.post("/api/export", json={
+            "kind": "table-xlsx", "data": {"machine_output": payload}})
+        assert response.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            ET.fromstring(archive.read("xl/workbook.xml"))
+
     def test_batch_zip_inner_malformed_table_is_422(self, client, valid_table):
         payload = {"files": [{
             "kind": "table-xlsx", "filename": "t.xlsx",

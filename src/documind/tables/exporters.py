@@ -27,17 +27,29 @@ XML_ILLEGAL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 EXCEL_ILLEGAL_TITLE_CHARS_RE = re.compile(r"[\\/*?:\[\]]")
 MAX_SHEET_TITLE_LENGTH = 31
 
+# XML 1.0 also forbids control characters and unpaired surrogates in the
+# serialized document: openpyxl silently SAVES a title carrying them, but
+# the produced xl/workbook.xml is not well-formed and strict consumers
+# (Excel included) reject the whole file. Titles get the same character
+# policy as cell values (_xlsx_text), extended with the surrogate range.
+XML_TITLE_ILLEGAL_CHARS_RE = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff]"
+)
+
 
 def excel_sheet_title(table_id: str, used_titles: set[str]) -> str:
     """Deterministic, Excel-safe worksheet title for one table.
 
-    Illegal characters become ``_``, whitespace-trimmed empties fall back
-    to ``"Table"``, the result is capped at Excel's 31-character limit,
-    and case-insensitive collisions get ``_2``, ``_3``… suffixes
-    (truncation-aware so the title never exceeds the limit). No table is
-    ever dropped; every table keeps a distinct sheet.
+    XML-illegal control characters and unpaired surrogates are stripped
+    (they would corrupt xl/workbook.xml despite openpyxl saving silently),
+    illegal spreadsheet characters become ``_``, whitespace-trimmed
+    empties fall back to ``"Table"``, the result is capped at Excel's
+    31-character limit, and case-insensitive collisions get ``_2``,
+    ``_3``… suffixes (truncation-aware so the title never exceeds the
+    limit). No table is ever dropped; every table keeps a distinct sheet.
     """
-    base = EXCEL_ILLEGAL_TITLE_CHARS_RE.sub("_", str(table_id)).strip()
+    base = XML_TITLE_ILLEGAL_CHARS_RE.sub("", str(table_id))
+    base = EXCEL_ILLEGAL_TITLE_CHARS_RE.sub("_", base).strip()
     base = base[:MAX_SHEET_TITLE_LENGTH] or "Table"
     title, counter = base, 2
     while title.casefold() in used_titles:
