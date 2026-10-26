@@ -35,13 +35,17 @@ def recognize_tables(
     image_path: str | Path,
     ocr_items: list[dict] | None = None,
     lang: str = "en",
+    ocr_runner=None,
 ) -> TableResult:
     """Detect ruled tables in ``image_path`` and fill cells with OCR text.
 
     ``ocr_items`` accepts items from a saved ``documind-ocr`` JSON
-    ({"text", "confidence", "box"}); when omitted, PaddleOCR runs on the
-    image. Warnings report unassigned regions and multi-table images;
-    text is never invented for empty cells.
+    ({"text", "confidence", "box"}); when omitted, OCR runs on the image —
+    via ``ocr_runner(image_path)`` when provided (lets callers reuse an
+    already-initialized shared engine), otherwise through a fresh local
+    PaddleOCR engine exactly as the standalone CLI does. Warnings report
+    unassigned regions and multi-table images; text is never invented for
+    empty cells.
     """
     image_path = Path(image_path)
     image = _load_image(image_path)
@@ -55,7 +59,7 @@ def recognize_tables(
         warnings.append(f"{len(grids)} table regions detected")
 
     if ocr_items is None:
-        ocr_items = _run_ocr(image_path, lang)
+        ocr_items = ocr_runner(image_path) if ocr_runner else _run_ocr(image_path, lang)
 
     tables: list[Table] = []
     for index, grid in enumerate(grids):

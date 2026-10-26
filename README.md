@@ -37,8 +37,8 @@ data.
 ## Tech Stack
 
 Current: Python 3.12, PaddleOCR 3.x / PaddlePaddle 3.x (CPU), OpenCV
-(geometry), Pillow, openpyxl (XLSX), pytest.
-Planned (later milestones): FastAPI, PostgreSQL, Streamlit, Docker.
+(geometry), Pillow, openpyxl (XLSX), FastAPI + vanilla JS web UI (local
+only), pytest. Planned (later milestones): PDF input, PostgreSQL.
 
 ## Setup (Windows, Python 3.12)
 
@@ -226,6 +226,20 @@ images, predictions, and reports stay local. Ground truth is annotated
 manually — never generated from predictions. Real-document metrics are
 **pending** until authentic, verified labels exist.
 
+### 6. Web app — local Document Intelligence UI (M5A)
+
+```powershell
+pip install -e ".[web]"
+documind-web        # http://127.0.0.1:8000 (local only, no CORS)
+```
+
+Upload an image, preview it, choose OCR / Invoice / Table / Auto, and
+inspect results with bounding-box overlays that highlight the OCR region
+behind each field. Invoice fields and table cells are editable —
+corrections are exported **alongside** the untouched machine output.
+Experiments and results stay on this machine. API contract:
+[docs/web-api.md](docs/web-api.md).
+
 ## Tests
 
 ```powershell
@@ -272,6 +286,7 @@ src/documind/        core package
                        report, CLI (M4A)
   dataset.py           real-data onboarding/validation (M4B)
   dataset_cli.py       documind-dataset entry point
+  web/                 FastAPI app, service layer, schemas, static UI (M5A)
 tests/               pytest suite + fixtures (synthetic OCR JSONs, table truth)
 scripts/             dev utilities (sample generators, table evaluation)
 assets/samples/      small synthetic sample documents
@@ -306,9 +321,11 @@ reports/             evaluation results (m3a, m4a baselines)
   agreement)~~ ✓ — real-data evaluation **pending** labeled data
 - ~~**M4B Phase 1:** real-document dataset onboarding tooling~~ ✓ —
   real-document metrics **pending** authentic annotated data
+- ~~**M5A:** local FastAPI backend + web frontend~~ ✓
 - **M4B Phase 2:** evaluate on labeled real documents
+- **M5B:** PDF input, batch processing, richer exports
+- **M5C:** extraction robustness + Vietnamese labels/i18n
 - **M3B:** borderless table recognition (model-based)
-- **M5:** API service and frontend
 
 ## Development Approach
 

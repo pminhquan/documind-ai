@@ -13,7 +13,7 @@ prefer completing PR B (web app) correctly over partially doing B–E.
 
 - [x] Phase 0 — repository audit and baseline (main @ 7e7621f post PR #5, 223 tests green)
 - [x] Phase 1 / PR A — quality foundations + agent skills (this PR)
-- [ ] Phase 2 / PR B — M5A: local FastAPI backend + web frontend
+- [x] Phase 2 / PR B — M5A: local FastAPI backend + web frontend
 - [ ] Phase 3 / PR C — M5B: PDF input, batch processing, richer exports
 - [ ] Phase 4 / PR D — M5C: extraction robustness + Vietnamese labels/i18n
 - [ ] Phase 5 / PR E — performance profiling + release polish
@@ -28,19 +28,24 @@ Acceptance criteria:
 - [x] README/pyproject no longer carry stale totals or hardcoded test counts.
 - [x] Full test suite green; CI green.
 
-## PR B — M5A: local web application (next)
+## PR B — M5A: local web application (done, stacked on PR A)
 
 Goal: local-first FastAPI backend + vanilla JS frontend reusing the
 existing pipelines. Endpoint contracts documented; uploads untrusted
 (size/extension/content validation, temp cleanup, bounded inference
 concurrency, no public binding). Human-in-the-loop corrections keep
 machine output and user corrections separate. Acceptance:
-- [ ] All endpoints tested with mocked inference including error paths.
-- [ ] Synthetic receipt processed end-to-end through the API.
-- [ ] Bounding boxes scale with the preview image; provenance highlight.
-- [ ] Invoice fields and table cells editable; corrections exported
-      alongside original machine output.
-- [ ] CLI tools unchanged.
+- [x] All endpoints tested with mocked inference including error paths
+      (24 web tests: security, exports read-back, HITL payload).
+- [x] Synthetic receipt processed end-to-end through the API with real
+      inference (30 OCR regions, invoice total 13.53, status ok).
+- [x] Bounding boxes scale with the preview image; provenance highlight
+      on hover/focus (implemented in app.js; UI walkthrough pending user).
+- [x] Invoice fields and table cells editable; corrections exported
+      alongside original machine output (`machine_output` +
+      `user_corrections`).
+- [x] CLI tools unchanged (223 pre-existing tests still green).
+- [x] API contract documented: docs/web-api.md.
 
 ## PR C — M5B: PDF, batch, exports (pending)
 
