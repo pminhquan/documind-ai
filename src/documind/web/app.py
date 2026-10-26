@@ -169,10 +169,87 @@ def _apply_table_corrections(payload: dict) -> TableResult:
     return result
 
 
+def _require(condition: bool, detail: str) -> None:
+    if not condition:
+        raise HTTPException(status_code=422, detail=detail)
+
+
+def _payload_int(value, context: str) -> int:
+    """Strict integer extraction: bool is an int subclass but is never a
+    valid dimension/coordinate in a client payload."""
+    _require(isinstance(value, int) and not isinstance(value, bool),
+             f"{context} must be an integer")
+    return value
+
+
+_TABLE_CELL_FIELDS = frozenset({
+    "row_index", "column_index", "text", "bounding_box",
+    "source_ocr_indices", "confidence",
+})
+
+
+def _table_from_payload(index: int, table) -> Table:
+    """Validate one client table entry before any dataclass construction.
+
+    Every field the exporters touch is checked here so malformed payloads
+    fail with a stable 422 instead of an uncontrolled 500 from
+    ``int()``, ``TableCell(**cell)`` or ``table_matrix`` indexing.
+    Duplicate coordinates are tolerated (last write wins in the matrix);
+    everything structurally invalid is rejected up front.
+    """
+    context = f"tables[{index}]"
+    _require(isinstance(table, dict), f"{context} must be an object")
+    rows = _payload_int(table.get("rows", 0), f"{context}.rows")
+    columns = _payload_int(table.get("columns", 0), f"{context}.columns")
+    _require(0 <= rows <= MAX_TABLE_DIMENSION
+             and 0 <= columns <= MAX_TABLE_DIMENSION,
+             f"{context} exceeds the {MAX_TABLE_DIMENSION}x"
+             f"{MAX_TABLE_DIMENSION} dimension limit")
+    table_id = table.get("table_id", f"table_{index}")
+    _require(isinstance(table_id, str), f"{context}.table_id must be a string")
+    warnings = table.get("warnings", [])
+    _require(isinstance(warnings, list), f"{context}.warnings must be a list")
+    cells_raw = table.get("cells", [])
+    _require(isinstance(cells_raw, list), f"{context}.cells must be a list")
+
+    cells: list[TableCell] = []
+    for cell_index, cell in enumerate(cells_raw):
+        cell_context = f"{context}.cells[{cell_index}]"
+        _require(isinstance(cell, dict), f"{cell_context} must be an object")
+        unknown = set(cell) - _TABLE_CELL_FIELDS
+        _require(not unknown,
+                 f"{cell_context} has unknown fields: {sorted(unknown)}")
+        row_index = _payload_int(cell.get("row_index"),
+                                 f"{cell_context}.row_index")
+        column_index = _payload_int(cell.get("column_index"),
+                                    f"{cell_context}.column_index")
+        _require(0 <= row_index < rows and 0 <= column_index < columns,
+                 f"{cell_context} coordinates outside the "
+                 f"{rows}x{columns} table")
+        text = cell.get("text", "")
+        _require(isinstance(text, str), f"{cell_context}.text must be a string")
+        bounding_box = cell.get("bounding_box")
+        _require(isinstance(bounding_box, list),
+                 f"{cell_context}.bounding_box must be a list")
+        source_ocr_indices = cell.get("source_ocr_indices", [])
+        _require(isinstance(source_ocr_indices, list),
+                 f"{cell_context}.source_ocr_indices must be a list")
+        cells.append(TableCell(
+            row_index=row_index, column_index=column_index, text=text,
+            bounding_box=bounding_box, source_ocr_indices=source_ocr_indices,
+            confidence=cell.get("confidence"),
+        ))
+    return Table(
+        table_id=table_id, source_image=str(table.get("source_image", "")),
+        rows=rows, columns=columns, cells=cells, warnings=list(warnings),
+    )
+
+
 def _table_result_from_payload(payload: dict) -> TableResult:
     """Accept a raw table result dict or one of the known export wrappers
     (``machine_output`` from the human-in-the-loop payload, or
-    ``tables_result``). Enforces bounded table/cell counts."""
+    ``tables_result``). Enforces bounded table/cell counts and validates
+    every table entry before materialization."""
     if "tables" not in payload:
         for wrapper in ("machine_output", "tables_result"):
             candidate = payload.get(wrapper)
@@ -180,42 +257,20 @@ def _table_result_from_payload(payload: dict) -> TableResult:
                 payload = candidate
                 break
     tables = payload.get("tables", [])
-    if not isinstance(tables, list):
-        raise HTTPException(status_code=422, detail="'tables' must be a list")
-    if len(tables) > MAX_EXPORT_TABLES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Too many tables ({len(tables)}; limit {MAX_EXPORT_TABLES})",
-        )
-    total_cells = 0
-    for index, table in enumerate(tables):
-        rows, columns = int(table.get("rows", 0)), int(table.get("columns", 0))
-        if rows > MAX_TABLE_DIMENSION or columns > MAX_TABLE_DIMENSION:
-            raise HTTPException(
-                status_code=422,
-                detail=f"tables[{index}] exceeds the {MAX_TABLE_DIMENSION}x"
-                f"{MAX_TABLE_DIMENSION} dimension limit",
-            )
-        total_cells += rows * columns
-    if total_cells > MAX_EXPORT_CELLS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Too many cells ({total_cells}; limit {MAX_EXPORT_CELLS})",
-        )
+    _require(isinstance(tables, list), "'tables' must be a list")
+    _require(len(tables) <= MAX_EXPORT_TABLES,
+             f"Too many tables ({len(tables)}; limit {MAX_EXPORT_TABLES})")
+    payload_warnings = payload.get("warnings", [])
+    _require(isinstance(payload_warnings, list), "'warnings' must be a list")
+    validated = [_table_from_payload(index, table)
+                 for index, table in enumerate(tables)]
+    total_cells = sum(table.rows * table.columns for table in validated)
+    _require(total_cells <= MAX_EXPORT_CELLS,
+             f"Too many cells ({total_cells}; limit {MAX_EXPORT_CELLS})")
     return TableResult(
         source_image=str(payload.get("source_image", "")),
-        tables=[
-            Table(
-                table_id=table.get("table_id", f"table_{index}"),
-                source_image=str(table.get("source_image", "")),
-                rows=int(table.get("rows", 0)),
-                columns=int(table.get("columns", 0)),
-                cells=[TableCell(**cell) for cell in table.get("cells", [])],
-                warnings=list(table.get("warnings", [])),
-            )
-            for index, table in enumerate(payload.get("tables", []))
-        ],
-        warnings=list(payload.get("warnings", [])),
+        tables=validated,
+        warnings=list(payload_warnings),
     )
 
 

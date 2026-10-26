@@ -20,6 +20,33 @@ NEGATIVE_NUMBER_RE = re.compile(r"-\d+(?:[.,]\d+)?")
 # keep the raw recognized text.
 XML_ILLEGAL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
+# Excel worksheet-title rules: these characters are forbidden, the title
+# is capped at 31 characters, and titles must be unique case-insensitively
+# within one workbook. Applied to SHEET NAMES only — JSON table_id values
+# are never rewritten.
+EXCEL_ILLEGAL_TITLE_CHARS_RE = re.compile(r"[\\/*?:\[\]]")
+MAX_SHEET_TITLE_LENGTH = 31
+
+
+def excel_sheet_title(table_id: str, used_titles: set[str]) -> str:
+    """Deterministic, Excel-safe worksheet title for one table.
+
+    Illegal characters become ``_``, whitespace-trimmed empties fall back
+    to ``"Table"``, the result is capped at Excel's 31-character limit,
+    and case-insensitive collisions get ``_2``, ``_3``… suffixes
+    (truncation-aware so the title never exceeds the limit). No table is
+    ever dropped; every table keeps a distinct sheet.
+    """
+    base = EXCEL_ILLEGAL_TITLE_CHARS_RE.sub("_", str(table_id)).strip()
+    base = base[:MAX_SHEET_TITLE_LENGTH] or "Table"
+    title, counter = base, 2
+    while title.casefold() in used_titles:
+        suffix = f"_{counter}"
+        title = base[:MAX_SHEET_TITLE_LENGTH - len(suffix)] + suffix
+        counter += 1
+    used_titles.add(title.casefold())
+    return title
+
 
 def _csv_safe(value: str) -> str:
     """Quote-prefix values a spreadsheet would misread as formulas.
@@ -101,8 +128,10 @@ def export_xlsx(result: TableResult, path: str | Path) -> Path:
         return output
 
     workbook.remove(workbook.active)
+    used_titles: set[str] = set()
     for table in result.tables:
-        sheet = workbook.create_sheet(title=table.table_id)
+        sheet = workbook.create_sheet(
+            title=excel_sheet_title(table.table_id, used_titles))
         for row_index, row in enumerate(table_matrix(table), start=1):
             for col_index, value in enumerate(row, start=1):
                 cell = sheet.cell(

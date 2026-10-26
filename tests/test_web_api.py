@@ -511,3 +511,144 @@ class TestInferenceSafety:
 
         service.reset_engine()
         assert service._engine is None
+
+
+def _valid_export_table(table_id: str = "table_0") -> dict:
+    return {
+        "table_id": table_id, "source_image": "x.png", "rows": 2, "columns": 2,
+        "cells": [
+            {"row_index": r, "column_index": c, "text": f"r{r}c{c}",
+             "bounding_box": [[0, 0], [1, 0], [1, 1], [0, 1]],
+             "source_ocr_indices": [], "confidence": 0.9}
+            for r in range(2) for c in range(2)
+        ],
+        "warnings": [],
+    }
+
+
+def _tables_payload(table: dict, **collection_overrides) -> dict:
+    """Wrap one table in the TableResponse collection shape."""
+    return {"tables": [table], "warnings": [], **collection_overrides}
+
+
+def _mutate_first_cell(table: dict, **changes) -> dict:
+    mutated = json.loads(json.dumps(table))
+    mutated["cells"][0].update(changes)
+    return mutated
+
+
+# Each entry mutates the TableResponse COLLECTION; all are client errors
+# that must come back as 422 instead of an uncontrolled 500.
+MALFORMED_TABLE_PAYLOADS = {
+    "tables_not_list": lambda t: {"tables": "junk"},
+    "non_object_table": lambda t: {"tables": ["junk"]},
+    "rows_string": lambda t: _tables_payload({**t, "rows": "abc"}),
+    "rows_bool": lambda t: _tables_payload({**t, "rows": True}),
+    "rows_negative": lambda t: _tables_payload({**t, "rows": -2}),
+    "rows_too_large": lambda t: _tables_payload({**t, "rows": 501}),
+    "columns_bool": lambda t: _tables_payload({**t, "columns": False}),
+    "too_many_cells": lambda t: _tables_payload({**t, "rows": 200,
+                                                 "columns": 200}),
+    "cells_not_list": lambda t: _tables_payload({**t, "cells": "junk"}),
+    "cell_not_object": lambda t: _tables_payload({**t, "cells": ["junk"]}),
+    "cell_missing_bounding_box": lambda t: _tables_payload({
+        **t, "cells": [{k: v for k, v in t["cells"][0].items()
+                        if k != "bounding_box"}, *t["cells"][1:]]}),
+    "cell_unknown_key": lambda t: _tables_payload(
+        _mutate_first_cell(t, junk_key=1)),
+    "cell_coord_string": lambda t: _tables_payload(
+        _mutate_first_cell(t, row_index="0")),
+    "cell_coord_bool": lambda t: _tables_payload(
+        _mutate_first_cell(t, row_index=True)),
+    "cell_coord_out_of_bounds": lambda t: _tables_payload(
+        _mutate_first_cell(t, row_index=5)),
+    "cell_coord_negative": lambda t: _tables_payload(
+        _mutate_first_cell(t, row_index=-1)),
+    "cell_text_not_string": lambda t: _tables_payload(
+        _mutate_first_cell(t, text=42)),
+    "warnings_not_list": lambda t: _tables_payload(t, warnings="junk"),
+}
+
+
+class TestTableExportPayloadValidation:
+    """D-17: malformed table export payloads must return 422, never an
+    uncontrolled 500 from int()/TableCell(**cell)/openpyxl."""
+
+    @pytest.fixture
+    def valid_table(self):
+        return _valid_export_table()
+
+    @pytest.mark.parametrize("case", sorted(MALFORMED_TABLE_PAYLOADS))
+    def test_malformed_payload_is_422_not_500(self, client, valid_table, case):
+        payload = {"machine_output": MALFORMED_TABLE_PAYLOADS[case](valid_table)}
+        response = client.post("/api/export", json={
+            "kind": "table-csv", "data": payload})
+        assert response.status_code == 422, (
+            f"case {case}: expected 422, got {response.status_code}")
+
+    def test_valid_table_csv_still_exports(self, client, valid_table):
+        response = client.post("/api/export", json={
+            "kind": "table-csv",
+            "data": {"machine_output": _tables_payload(valid_table)}})
+        assert response.status_code == 200
+        assert "r1c1" in response.content.decode("utf-8")
+
+    def test_valid_xlsx_read_back_preserves_cells(self, client, valid_table):
+        import openpyxl
+        response = client.post("/api/export", json={
+            "kind": "table-xlsx",
+            "data": {"machine_output": _tables_payload(valid_table)}})
+        assert response.status_code == 200
+        ws = openpyxl.load_workbook(io.BytesIO(response.content)).active
+        assert ws["B2"].value == "r1c1"
+
+    def test_formula_injection_safety_intact(self, client, valid_table):
+        payload = _tables_payload(_mutate_first_cell(valid_table, text="=cmd()"))
+        response = client.post("/api/export", json={
+            "kind": "table-csv", "data": {"machine_output": payload}})
+        assert response.status_code == 200
+        assert "'=cmd()" in response.content.decode("utf-8")
+
+    def test_xlsx_sheet_title_sanitized(self, client, valid_table):
+        import openpyxl
+        illegal = "\\/*?:[]"
+        payload = _tables_payload({**valid_table, "table_id": "bad:title/here*?"})
+        response = client.post("/api/export", json={
+            "kind": "table-xlsx", "data": {"machine_output": payload}})
+        assert response.status_code == 200
+        workbook = openpyxl.load_workbook(io.BytesIO(response.content))
+        (title,) = workbook.sheetnames
+        assert not (set(title) & set(illegal))
+        assert workbook[title]["B2"].value == "r1c1"
+
+    def test_xlsx_sheet_title_truncated_to_31(self, client, valid_table):
+        import openpyxl
+        payload = _tables_payload({**valid_table, "table_id": "t" * 40})
+        response = client.post("/api/export", json={
+            "kind": "table-xlsx", "data": {"machine_output": payload}})
+        assert response.status_code == 200
+        workbook = openpyxl.load_workbook(io.BytesIO(response.content))
+        (title,) = workbook.sheetnames
+        assert len(title) <= 31
+        assert workbook[title]["B2"].value == "r1c1"
+
+    def test_xlsx_duplicate_titles_are_unique(self, client, valid_table):
+        import openpyxl
+        payload = {"tables": [_valid_export_table("Report"),
+                              _valid_export_table("report")], "warnings": []}
+        response = client.post("/api/export", json={
+            "kind": "table-xlsx", "data": {"machine_output": payload}})
+        assert response.status_code == 200
+        workbook = openpyxl.load_workbook(io.BytesIO(response.content))
+        assert len(workbook.sheetnames) == 2
+        assert len({name.casefold() for name in workbook.sheetnames}) == 2
+
+    def test_batch_zip_inner_malformed_table_is_422(self, client, valid_table):
+        payload = {"files": [{
+            "kind": "table-xlsx", "filename": "t.xlsx",
+            "data": {"machine_output": _tables_payload({**valid_table,
+                                                        "rows": "abc"})},
+        }]}
+        response = client.post("/api/export", json={
+            "kind": "batch-zip", "data": payload})
+        assert response.status_code == 422
