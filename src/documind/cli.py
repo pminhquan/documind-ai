@@ -79,6 +79,9 @@ def main(argv: list[str] | None = None) -> int:
     except (PreprocessingError, OcrEngineError) as exc:
         print(f"OCR error: {exc}", file=sys.stderr)
         return 1
+    except OSError as exc:
+        print(f"OCR error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

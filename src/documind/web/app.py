@@ -233,7 +233,6 @@ INVOICE_SCALAR_KEYS = (
 )
 INVOICE_ITEM_KEYS = ("description", "quantity", "unit_price", "line_total")
 INVOICE_ITEM_PATH_RE = re.compile(r"^line_items\[(\d+)\]\.(\w+)$")
-MAX_BATCH_EXPORTS = 10
 
 
 def _apply_invoice_corrections(invoice: dict, corrections: dict | None) -> dict:
@@ -391,7 +390,7 @@ def _build_export(kind: str, data: dict) -> tuple[bytes, str, str]:
             used_names: set[str] = set()
             for index, item in enumerate(files):
                 if (not isinstance(item, dict)
-                        or item.get("kind") not in EXPORT_KINDS
+                        or item.get("kind") not in EXPORT_KINDS - {"batch-zip"}
                         or not isinstance(item.get("data"), dict)):
                     raise HTTPException(
                         status_code=422,
