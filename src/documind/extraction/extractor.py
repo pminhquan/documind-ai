@@ -25,6 +25,7 @@ from .layout import OcrToken, VisualLine, group_lines
 from .models import ExtractionResult, Invoice, LineItem, Provenance
 from .parsing import (
     CURRENCY_NOISE_RE,
+    MERGED_MONEY_RE,
     MONEY_TOKEN_RE,
     QTY_PRICE_RE,
     parse_amount,
@@ -63,10 +64,13 @@ from .lexicon_vi import (  # noqa: E402
 
 HEADER_RE = HEADER_RE + "|" + HEADER_ROW_VI
 SUMMARY_START_RE = (
-    SUMMARY_START_RE + r"|" + INVOICE_NUMBER_LABEL_VI.replace(r"\b", r"\b")
-    + r"|\b(tam tinh|tong tien hang|giam gia|chiet khau|thue gtgt|"
-    r"tien khach dua|tien thua|tien tra lai|tong cong|tong thanh toan|"
-    r"thanh tien|tong tien)\b"
+    SUMMARY_START_RE + "|" + INVOICE_NUMBER_LABEL_VI
+    # Zone openers must cover every SUMMARY_LABELS_VI keyword: a label
+    # that only SUMMARY_FIELDS knows (thue, khach dua, tien mat) would
+    # otherwise stay inside the ITEM region and become a bogus line item.
+    + r"|\b(tam tinh|tong tien hang|giam gia|chiet khau|thue|"
+    r"tien khach dua|khach dua|tien mat|tien thua|tien tra lai|"
+    r"tong cong|tong thanh toan|thanh tien|tong tien)\b"
 )
 
 # Ordered: a summary row is classified by the FIRST matching pattern, so
@@ -84,11 +88,18 @@ SUMMARY_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 CURRENCY_LABEL_RE = re.compile(r"(?i)\bcurrency\b\s*[:.]?\s*([A-Za-z]{3})\b")
+# The capture must contain a digit: an optional label group followed by an
+# all-optional separator otherwise grabs the NEXT WORD on label lines
+# ("Invoice Date: ..." -> "Date", "RECEIPT FROM ..." -> "FROM") and stops
+# the scan before the real number is reached.
 INVOICE_NUMBER_RE = re.compile(
     r"(?i)\b(?:receipt|invoice)\s*(?:#|no\.?|num(?:ber)?)?\s*[:#]?\s*"
-    r"([A-Za-z0-9][A-Za-z0-9/-]{2,})"
+    r"((?=[A-Za-z0-9/-]*\d)[A-Za-z0-9][A-Za-z0-9/-]{2,})"
 )
-SYMBOL_TO_CODE = {"$": "USD", "€": "EUR", "£": "GBP", "đ": "VND", "₫": "VND"}
+# đ/₫ are deliberately NOT here: as plain substrings they sit inside common
+# Vietnamese words ("đơn giá", "đã"). The standalone-sign rule lives in
+# DONG_SIGN_RE and is applied by the VND pass in extract_currency.
+SYMBOL_TO_CODE = {"$": "USD", "€": "EUR", "£": "GBP"}
 DATE_LABELS_RE = re.compile(r"(?i)\bdate\b|" + DATE_LABEL_VI)
 
 MAX_OCR_JSON_BYTES = 50 * 1024 * 1024
@@ -137,16 +148,18 @@ def _line_has_amount(line: VisualLine) -> bool:
 def _rightmost_amount(line: VisualLine) -> Decimal | None:
     """Rightmost money token on the line; regex fallback for merged text.
 
-    The fallback takes the LAST complete MONEY_TOKEN_RE match (rightmost
-    in reading order); malformed runs match nothing rather than a
-    substring of a larger amount.
+    The token pass takes the rightmost whole-token amount. The fallback
+    scans the merged line text with MERGED_MONEY_RE (decimal fraction,
+    thousands-grouped, or bare integer) and takes the LAST complete
+    match (rightmost in reading order); malformed runs match nothing
+    rather than a substring of a larger amount.
     """
     for token in reversed(line.tokens):
         if _is_money_token(token):
             amount = parse_amount(token.text)
             if amount is not None:
                 return amount
-    matches = list(re.finditer(MONEY_TOKEN_RE, _clean_money_text(line.text)))
+    matches = list(re.finditer(MERGED_MONEY_RE, _clean_money_text(line.text)))
     if matches:
         return parse_amount(matches[-1].group(0))
     return None
@@ -177,11 +190,15 @@ class _Extractor:
                 r"(?i)(?:ten cua hang|don vi ban hang|cua hang)\s*[:.-]?\s*(.+)",
                 fold_vi(line.text),
             )
-            if labelled and labelled.group(1).strip():
+            if labelled:
                 # Preserve the original (diacritic) tail after the label.
                 raw_tail = re.split(r"(?i)[:] ", line.text, maxsplit=1)
-                value = raw_tail[1].strip() if len(raw_tail) == 2 else labelled.group(1)
-                if value:
+                value = (raw_tail[1] if len(raw_tail) == 2
+                         else labelled.group(1)).strip(" :.-")
+                # A label-only line ("TEN CUA HANG:") backtracks the regex
+                # into matching the bare ":" separator; reject anything
+                # without a word character and keep scanning.
+                if re.search(r"\w", value):
                     self.invoice.supplier = value
                     self._record("supplier", line.tokens[0])
                     return
@@ -195,7 +212,8 @@ class _Extractor:
 
     def extract_invoice_number(self, lines: list[VisualLine]) -> None:
         vi_number = re.compile(
-            r"(?:so hoa don|so hd)\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9/-]{2,})"
+            r"(?:so hoa don|so hd)\s*[:#]?\s*"
+            r"((?=[A-Za-z0-9/-]*\d)[A-Za-z0-9][A-Za-z0-9/-]{2,})"
         )
         for line in lines:
             match = re.search(INVOICE_NUMBER_RE, line.text) or vi_number.search(
@@ -424,9 +442,10 @@ def _parse_item_line(
     elif qty_match:
         # Merged single-token row like "SOAP 2 x 2.50 5.00": the line
         # total is the rightmost complete money token after the
-        # qty x price pattern.
+        # qty x price pattern (MERGED_MONEY_RE so integer totals,
+        # e.g. "CA PHE 2 x 10.000 20.000", are not dropped).
         tail_matches = list(
-            re.finditer(MONEY_TOKEN_RE, _clean_money_text(joined[qty_match.end():]))
+            re.finditer(MERGED_MONEY_RE, _clean_money_text(joined[qty_match.end():]))
         )
         if tail_matches:
             item.line_total = parse_amount(tail_matches[-1].group(0))
