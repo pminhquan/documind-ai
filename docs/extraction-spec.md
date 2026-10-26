@@ -74,8 +74,13 @@ to a folded copy of the row text — the OCR text itself is never
 modified. Supported: HÓA ĐƠN/SỐ HÓA ĐƠN, NGÀY LẬP/NGÀY BÁN, TÊN CỬA
 HÀNG/ĐƠN VỊ BÁN HÀNG (labelled values become supplier), TẠM TÍNH/TỔNG
 TIỀN HÀNG → subtotal, THÀNH TIỀN/TỔNG CỘNG/TỔNG THANH TOÁN → total,
-THUẾ GTGT/VAT → tax, GIẢM GIÁ/CHIẾT KHẤU → discount, TIỀN KHÁCH ĐƯA →
-payment, TIỀN THỪA/TIỀN TRẢ LẠI → change, SỐ LƯỢNG…ĐƠN GIÁ header.
+THUẾ (GTGT)/VAT → tax, GIẢM GIÁ/CHIẾT KHẤU → discount, TIỀN MẶT/TIỀN
+KHÁCH ĐƯA/KHÁCH ĐƯA → payment, TIỀN THỪA/TIỀN TRẢ LẠI → change, SỐ
+LƯỢNG…ĐƠN GIÁ header. Every summary keyword also OPENS the summary zone
+(a cash/tax row before the subtotal ends the item region instead of
+becoming a bogus line item). Invoice numbers must contain a digit —
+label words on neighbouring lines ("Invoice Date: …") are never
+captured.
 
 Monetary: `đ`/`₫`/VNĐ count as currency only as standalone tokens, so
 "đơn giá" is never currency noise; attached signs (`₫125.000`) are
@@ -98,11 +103,13 @@ accuracy remains pending labeled data.
 - Only `.` → thousands if `1.234.567`-shaped and not `\d+.\d{1,2}`,
   else decimal (`12.30` → 12.30, `1.234` → 1234).
 - Currency symbols/words (`$ € £ ¥ đ usd vnd ...`) are stripped first.
-- The money-token fallback (`MONEY_TOKEN_RE`) accepts **unbounded
-  ungrouped integer digits** (`1234.56`, `12345.67`, `1234567,89` all
-  match completely) and uses lookarounds so a malformed run
-  (`12.34.56.78`) matches **nothing** instead of a substring — a value
-  that cannot be parsed reliably stays `null`.
+- The money-token fallback (`MONEY_TOKEN_RE` for whole tokens,
+  `MERGED_MONEY_RE` when a label and its amount share one OCR region,
+  e.g. `TONG CONG: 97.200`) accepts **unbounded ungrouped integer
+  digits** (`1234.56`, `12345.67`, `1234567,89`, bare `97200` and
+  thousands-grouped `20.000` all match completely) and uses lookarounds
+  so a malformed run (`12.34.56.78`) matches **nothing** instead of a
+  substring — a value that cannot be parsed reliably stays `null`.
 - When a row holds several candidates, the **rightmost complete match**
   wins.
 - A bare token qualifies as money only with an explicit 2-decimal
