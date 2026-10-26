@@ -136,3 +136,62 @@ class TestEnglishRegression:
         invoice = extract(vi_doc(rows)).invoice
         assert invoice.total == Decimal("9.57")
         assert invoice.supplier == "MINI MART EXPRESS"
+
+
+class TestSummaryZoneOpeners:
+    """Regression: SUMMARY_START_RE lacked thue/khach dua/tien mat, so a
+    cash/tax row printed before the subtotal stayed inside the ITEM
+    region: it became a bogus line item and tripped a false 'invalid'."""
+
+    def test_cash_row_before_subtotal_is_not_a_line_item(self):
+        rows = [
+            [("CỬA HÀNG MINIMART", 10, 10)],
+            [("Số hóa đơn: 00001234", 10, 40)],
+            [("Ngày lập: 25/10/2026", 10, 70)],
+            [("SOAP", 10, 100), ("2 x 2.50", 150, 100), ("5.00", 330, 100)],
+            [("TIỀN MẶT:", 10, 130), ("5.00", 330, 130)],
+            [("TẠM TÍNH", 10, 160), ("5.00", 330, 160)],
+            [("TỔNG CỘNG", 10, 190), ("5.00", 330, 190)],
+        ]
+        invoice = extract(vi_doc(rows)).invoice
+        assert [i.description for i in invoice.line_items] == ["SOAP"]
+        assert invoice.payment_amount == Decimal("5.00")
+        assert invoice.subtotal == Decimal("5.00")
+        assert invoice.total == Decimal("5.00")
+        assert invoice.validation_status == "ok"
+
+    def test_bare_tax_row_opens_summary_zone(self):
+        rows = [
+            [("CỬA HÀNG MINIMART", 10, 10)],
+            [("Số hóa đơn: 00001234", 10, 40)],
+            [("Ngày lập: 25/10/2026", 10, 70)],
+            [("SOAP", 10, 100), ("2 x 2.50", 150, 100), ("5.00", 330, 100)],
+            [("THUẾ", 10, 130), ("1.800", 330, 130)],
+            [("TỔNG CỘNG", 10, 160), ("6.800", 330, 160)],
+        ]
+        invoice = extract(vi_doc(rows)).invoice
+        assert [i.description for i in invoice.line_items] == ["SOAP"]
+        assert invoice.tax == Decimal(1800)
+        assert invoice.total == Decimal(6800)
+        assert invoice.validation_status == "ok"
+
+    def test_merged_integer_total_vnd(self):
+        rows = [
+            [("CỬA HÀNG MINIMART", 10, 10)],
+            [("Số hóa đơn: 00001234", 10, 40)],
+            [("Ngày lập: 25/10/2026", 10, 70)],
+            [("CA PHE", 10, 100), ("2 x 10.000", 150, 100), ("20.000", 330, 100)],
+            [("TỔNG CỘNG: 97.200", 10, 130)],
+        ]
+        invoice = extract(vi_doc(rows)).invoice
+        assert [i.line_total for i in invoice.line_items] == [Decimal(20000)]
+        assert invoice.total == Decimal(97200)
+
+    def test_label_only_supplier_line_falls_through(self):
+        rows = [
+            [("TÊN CỬA HÀNG:", 10, 10)],
+            [("MINIMART", 10, 40)],
+            [("TỔNG CỘNG", 10, 70), ("9.000", 330, 70)],
+        ]
+        invoice = extract(vi_doc(rows)).invoice
+        assert invoice.supplier == "MINIMART"

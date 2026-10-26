@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--case-sensitive", action="store_true",
-        help="Disable casefold in text comparisons (OCR/table tasks)",
+        help="Disable casefold in text comparisons (OCR task only)",
     )
     parser.add_argument(
         "--preserve-whitespace", action="store_true",

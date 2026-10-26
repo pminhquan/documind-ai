@@ -35,7 +35,11 @@ def _predicted_matrix(table: dict, rows: int, columns: int,
     for cell in table.get("cells", []):
         row_index = cell.get("row_index")
         column_index = cell.get("column_index")
-        if not (isinstance(row_index, int) and isinstance(column_index, int)):
+        # bool is a subclass of int; "true"/"false" indices are not
+        # coordinates and must not silently address cells.
+        if not (isinstance(row_index, int) and not isinstance(row_index, bool)
+                and isinstance(column_index, int)
+                and not isinstance(column_index, bool)):
             unexpected += 1
             issues.append(f"cell with non-integer indices counted as extra: {cell!r}")
             continue
@@ -80,7 +84,11 @@ def _compare_table(expected: dict, predicted: dict) -> dict:
             predicted_text = predicted_matrix[row][column]
             if predicted_text is None:
                 missing += 1
-                if str(expected_text).strip():
+                # Same canonicalizer as the present-prediction branch so a
+                # JSON null ground-truth cell counts as EMPTY either way
+                # (str(None).strip() is truthy "None" and would skew the
+                # non-empty/empty denominators depending on the prediction).
+                if _normalize(expected_text):
                     non_empty_total += 1
                 else:
                     empty_total += 1

@@ -242,3 +242,17 @@ class TestBatchZipExport:
         response = client.post("/api/export", json={"kind": "batch-zip",
                                                     "data": payload})
         assert response.status_code == 422
+
+
+class TestBatchZipNesting:
+    def test_nested_batch_zip_rejected_422(self, client):
+        """Regression: batch-zip was a legal INNER entry kind, so a
+        client-supplied entry could recurse without any depth limit
+        (RecursionError -> 500). Nesting must be rejected with 422."""
+        payload = {"files": [
+            {"kind": "batch-zip", "filename": "nested.zip",
+             "data": {"files": []}},
+        ]}
+        response = client.post("/api/export",
+                               json={"kind": "batch-zip", "data": payload})
+        assert response.status_code == 422

@@ -387,3 +387,119 @@ class TestEdgeCases:
         # The real OCR splits the header row into two regions.
         result = extract(load_fixture("normal_receipt.json"))
         assert len(result.invoice.line_items) == 3
+
+
+def ocr_doc(lines):
+    """lines: list of rows, each a list of (text, x) cells; y auto-steps."""
+    items = []
+    y = 10
+    for cells in lines:
+        for text, x in cells:
+            items.append({"text": text, "box": [
+                [x, y], [x + 8 * len(text), y],
+                [x + 8 * len(text), y + 20], [x, y + 20]]})
+        y += 30
+    return {"engine": "fixture", "items": items}
+
+
+class TestMergedAmountRows:
+    """Regression: a label and its amount sharing ONE OCR region
+    ("TOTAL: 1250") lost integer/thousands-grouped amounts because the
+    merged-text fallback regex required a 2-digit fraction."""
+
+    def test_merged_integer_total(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL: 1250", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal(1250)
+
+    def test_merged_grouped_total(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL: 1,234,567", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal(1234567)
+
+    def test_merged_item_row_with_integer_line_total(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("CAFE", 10), ("2 x 10.000", 150), ("20.000", 330)],
+            [("TOTAL: 20000", 10)],
+        ]), source="t")
+        assert [
+            (i.description, i.quantity, i.unit_price, i.line_total)
+            for i in result.invoice.line_items
+        ] == [("CAFE", Decimal(2), Decimal(10000), Decimal(20000))]
+        assert result.invoice.total == Decimal(20000)
+
+    def test_space_grouped_integer_total(self):
+        """Regression (review): the grouped branch rejected space
+        separators, so "TOTAL: 1 234 567" degraded to the rightmost
+        group ("567") instead of the full amount."""
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL: 1 234 567", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal(1234567)
+
+    def test_stray_single_digit_cannot_win_rightmost(self):
+        """Regression (review): bare integers matched a single stray
+        digit, so "TOTAL: 97.20 0" resolved to 0; bare integers now
+        need >= 2 digits in the merged fallback."""
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL: 97.20 0", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal("97.20")
+
+    def test_malformed_run_still_yields_nothing(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL: 12.34.56.78", 10)],
+        ]), source="t")
+        assert result.invoice.total is None
+
+
+class TestHeaderFieldRobustness:
+    """Regression: optional label groups grabbed the next word on
+    header lines ("Invoice Date: ..." -> "Date") and stopped the scan
+    before the real value was reached."""
+
+    def test_invoice_date_line_does_not_become_invoice_number(self):
+        result = extract(ocr_doc([[("Invoice Date: 2026-10-25", 10)]]))
+        assert result.invoice.invoice_number is None
+
+    def test_receipt_from_line_does_not_become_invoice_number(self):
+        result = extract(ocr_doc([[("RECEIPT FROM WALMART", 10)]]))
+        assert result.invoice.invoice_number is None
+
+    def test_real_number_after_blocked_label_line_is_found(self):
+        result = extract(ocr_doc([
+            [("Invoice Date: 2026-10-25", 10)],
+            [("Invoice No: A-123", 10)],
+        ]))
+        assert result.invoice.invoice_number == "A-123"
+
+    def test_dong_inside_a_word_is_not_currency(self):
+        result = extract(ocr_doc([
+            [("đơn giá đặt biệt", 10)],
+            [("TOTAL 5.00 USD", 10)],
+        ]))
+        assert result.invoice.currency is None
+
+    def test_standalone_dong_sign_is_currency(self):
+        result = extract(ocr_doc([[("Gia: 5.000 đ", 10)]]))
+        assert result.invoice.currency == "VND"

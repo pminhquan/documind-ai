@@ -102,3 +102,28 @@ class TestCliMockedInference:
         exit_code = cli.main([str(gray), "-o", str(output)])
         assert exit_code == 0
         assert seen_paths and seen_paths[0].suffix == ".png"
+
+
+class TestCliOSErrorHandling:
+    def test_output_write_oserror_maps_to_exit_one(self, sample_png, tmp_path,
+                                                   monkeypatch, capsys):
+        """Regression: an OSError while writing the output produced a raw
+        traceback; sibling CLIs map it to a friendly exit 1."""
+
+        class FakeEngine:
+            def __init__(self, lang="en"):
+                self.lang = lang
+
+            def predict(self, image_path):
+                return [{
+                    "rec_texts": ["TOTAL 8.70"],
+                    "rec_scores": [0.97],
+                    "rec_polys": [[[1, 2], [30, 2], [30, 20], [1, 20]]],
+                }]
+
+        monkeypatch.setattr(cli, "PaddleOcrEngine", FakeEngine)
+        target = tmp_path / "out.json"
+        target.mkdir()  # writing to a directory raises OSError
+        exit_code = cli.main([str(sample_png), "-o", str(target)])
+        assert exit_code == 1
+        assert "OCR error" in capsys.readouterr().err

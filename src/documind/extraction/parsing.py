@@ -46,6 +46,23 @@ MONEY_TOKEN_RE = re.compile(
     r"(?<![\d.,])\d+(?:[.,\s]\d{3})*[.,]\d{2}(?![\d.,])"
 )
 
+# Merged-text amount scanner: every shape the token-level classifier
+# accepts (decimal fraction, thousands-grouped, bare integer), matched
+# with the same lookaround discipline. Used when a label and its amount
+# share ONE OCR region ("TONG CONG: 97.200") so no whole token is an
+# amount; integer VND totals must not vanish the way MONEY_TOKEN_RE
+# (2-digit fraction required) would. The grouped branch accepts space
+# separators (consistent with the decimal branch), and bare integers
+# need >= 2 digits so a stray single digit after the amount ("97.20 0")
+# cannot win the rightmost-match rule. Trade-off: a bare multi-digit run
+# such as a year can match when the fallback fires — summary/item rows
+# are amount-dominated text, and the arithmetic validation surfaces a
+# wrong value instead of it appearing silently.
+MERGED_MONEY_RE = re.compile(
+    r"(?<![\d.,])(?:\d+(?:[.,\s]\d{3})*[.,]\d{2}"
+    r"|\d{1,3}(?:[.,\s]\d{3})+|\d{2,})(?![\d.,])"
+)
+
 # quantity x unit_price, e.g. "2 x 2.50" (also accepts "*" and unicode x).
 QTY_PRICE_RE = re.compile(
     r"(\d+(?:[.,]\d+)?)\s*[xX×*]\s*(\d+(?:[.,]\d+)?)"

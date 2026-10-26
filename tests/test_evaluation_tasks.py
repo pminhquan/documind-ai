@@ -508,3 +508,38 @@ class TestTableEvaluation:
                                 [self.pred_table(1, 2, predicted)])
         comparison = summary["documents"][0]["comparisons"][0]
         assert comparison["cells_matched"] == 2
+    def test_null_truth_cell_counts_as_empty_either_way(self, tmp_path):
+        """Regression: a JSON null ground-truth cell landed in the
+        non-empty denominator when the prediction was missing (because
+        str(None).strip() is truthy "None") but in the empty denominator
+        when a prediction existed — one canonicalizer for both paths."""
+        predicted_table = {
+            "table_id": "table_0", "rows": 1, "columns": 2,
+            "cells": [{"row_index": 0, "column_index": 0, "text": "A"}],
+        }
+        summary = self.eval_one(tmp_path, "doc",
+                                [self.truth(1, 2, [["A", None]])],
+                                [predicted_table])
+        comparison = summary["documents"][0]["comparisons"][0]
+        assert comparison["missing_cells"] == 1
+        assert comparison["non_empty_cells_total"] == 1
+        assert comparison["empty_cells_total"] == 1
+
+    def test_boolean_coordinates_counted_unexpected(self, tmp_path):
+        """Regression: bool is an int subclass, so true/false indices
+        silently addressed cells instead of counting as unexpected."""
+        predicted_table = {
+            "table_id": "table_0", "rows": 2, "columns": 1,
+            "cells": [
+                {"row_index": 0, "column_index": 0, "text": "A"},
+                {"row_index": True, "column_index": False, "text": "BOOL"},
+            ],
+        }
+        summary = self.eval_one(tmp_path, "doc",
+                                [self.truth(2, 1, [["A"], ["B"]])],
+                                [predicted_table])
+        comparison = summary["documents"][0]["comparisons"][0]
+        assert comparison["cells_matched"] == 1
+        assert comparison["extra_cells"] == 1
+        assert comparison["missing_cells"] == 1
+        assert any("non-integer" in issue for issue in comparison["issues"])
