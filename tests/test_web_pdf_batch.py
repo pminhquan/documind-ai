@@ -256,3 +256,21 @@ class TestBatchZipNesting:
         response = client.post("/api/export",
                                json={"kind": "batch-zip", "data": payload})
         assert response.status_code == 422
+
+
+class TestPdfResponseSourceSanitization:
+    def test_pdf_pages_have_no_temp_path_and_distinct_ids(self, client,
+                                                          mocked_engine):
+        """D-19: per-page sources are stable upload#pageN labels — never
+        server-local render paths; page identity stays with page_index."""
+        response = client.post("/api/process",
+                               files={"upload": ("doc.pdf", make_pdf(2))},
+                               data={"workflow": "auto"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["kind"] == "pdf"
+        assert [page["page_index"] for page in body["pages"]] == [0, 1]
+        sources = [page["source"] for page in body["pages"]]
+        assert sources == ["upload#page0", "upload#page1"]
+        assert "documind_pdf_" not in response.text
+        assert "documind_upload_" not in response.text

@@ -652,3 +652,69 @@ class TestTableExportPayloadValidation:
         response = client.post("/api/export", json={
             "kind": "batch-zip", "data": payload})
         assert response.status_code == 422
+
+class TestResponseSourceSanitization:
+    """D-19: no server-local temporary path may appear in any response."""
+
+    TEMP_MARKER = "documind_upload_"
+
+    def _uploaded(self, client, url, data=None):
+        return client.post(url, files={"upload": ("doc.png", _png_bytes())},
+                           data=data or {})
+
+    def test_ocr_response_has_no_temp_path(self, client, mocked_engine):
+        response = self._uploaded(client, "/api/ocr")
+        assert response.status_code == 200
+        assert self.TEMP_MARKER not in response.text
+        assert response.json()["source"] == "upload"
+
+    def test_invoice_response_has_no_temp_path(self, client, mocked_engine):
+        response = self._uploaded(client, "/api/invoice")
+        assert response.status_code == 200
+        assert self.TEMP_MARKER not in response.text
+        assert response.json()["source"] == "upload"
+
+    def test_table_response_has_no_temp_path(self, client, mocked_engine,
+                                             mocked_tables):
+        response = self._uploaded(client, "/api/table")
+        assert response.status_code == 200
+        assert self.TEMP_MARKER not in response.text
+        assert response.json()["source_image"] == "upload"
+
+    def test_unified_response_has_no_temp_path(self, client, mocked_engine,
+                                               mocked_tables):
+        response = self._uploaded(client, "/api/process",
+                                  data={"workflow": "auto"})
+        assert response.status_code == 200
+        assert self.TEMP_MARKER not in response.text
+        body = response.json()
+        assert body["source"] == "upload"
+        assert body["ocr"]["source"] == "upload"
+        assert body["tables"]["source_image"] == "upload"
+        assert body["invoice"]["source"] == "upload"
+
+    def test_engine_error_message_has_no_temp_path(self, client, monkeypatch):
+        from documind.ocr.engine import OcrEngineError
+
+        class LeakyEngine:
+            def predict(self, path):
+                raise OcrEngineError(f"OCR inference failed for '{path}': boom")
+
+        monkeypatch.setattr(service, "_get_engine", lambda: LeakyEngine())
+        response = self._uploaded(client, "/api/ocr")
+        assert response.status_code == 500
+        assert self.TEMP_MARKER not in response.text
+        assert "boom" in response.text  # useful context survives
+
+    def test_decode_error_message_has_no_temp_path(self, client, mocked_engine,
+                                                   monkeypatch):
+        from documind.tables.pipeline import TableRecognitionError
+
+        def leaky_recognize(source, ocr_items=None, ocr_runner=None):
+            raise TableRecognitionError(f"Cannot decode image '{source}'")
+
+        monkeypatch.setattr(service, "recognize_tables", leaky_recognize)
+        response = self._uploaded(client, "/api/table")
+        assert response.status_code == 500
+        assert self.TEMP_MARKER not in response.text
+        assert "Cannot decode image" in response.text
