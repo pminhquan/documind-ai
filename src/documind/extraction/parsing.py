@@ -9,7 +9,15 @@ import unicodedata
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-CURRENCY_NOISE_RE = re.compile(r"(?i)\b(?:usd|vnd|eur|gbp|jpy)\b|[$€£¥]|đ")
+# Currency noise stripped before amount parsing. The Vietnamese đồng
+# markers (đ, ₫, VNĐ) match only as STANDALONE tokens — stripping every
+# "đ" would corrupt words like "đơn giá".
+CURRENCY_NOISE_RE = re.compile(
+    r"(?i)\b(?:usd|vnd|vnđ|eur|gbp|jpy)\b|[$€£¥]|(?<![\w])[đ₫](?![\w])"
+)
+# The đồng signs need their own prefix strip because the standalone-token
+# lookarounds above intentionally reject "₫125.000" (sign attached to digits).
+CURRENCY_PREFIX_RE = re.compile(r"^[$€£¥đ₫]+")
 
 # Candidate date tokens: 2026-10-25, 25/10/2026, 25.10.2026, 25 Oct 2026.
 DATE_TOKEN_RE = re.compile(
@@ -73,6 +81,7 @@ def parse_amount(text: str | None) -> Decimal | None:
     if text is None:
         return None
     s = normalize_text(str(text))
+    s = CURRENCY_PREFIX_RE.sub("", normalize_text(str(text))).strip()
     s = re.sub(CURRENCY_NOISE_RE, "", s).strip()
     if not s or not re.fullmatch(r"-?[\d.,\s]+", s):
         return None
