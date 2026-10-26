@@ -2,30 +2,52 @@
 
 Compact engineering checkpoint. Update after every work unit.
 
-## State (2026-10-25, session 3)
+## Final state of this run (2026-10-25, session 4) — QUEUE COMPLETE
 
-- Branch: `feat/m5b-pdf-batch-exports` (PR #8, base PR #7 `feat/m5a-web-app`, base PR #6 MERGED)
-- PR #8 head at last CI green: `db98958` (Stage 0.1 JS fatal fix + browser gate), CI https://github.com/pminhquan/documind-ai/actions/runs/40210461191
-- Tests: 272 passed; ruff clean; frontend gate green.
+- Working branch pushed last: `feat/m5d-performance` (PR #10, CI green,
+  head `c757778`)
+- All planned units of this run finished; PR graph (all OPEN, none
+  auto-merged — merge order):
+  1. #7  feat/m5a-web-app            (base main-merged #6) head 3c580ed
+  2. #8  feat/m5b-pdf-batch-exports  (base #7)  head ade7cce — Stage 0 done
+  3. #9  feat/m5c-vietnamese-documents (base #8) head — VI extraction
+  4. #10 feat/m5d-performance        (base #9)  head c757778 — benchmark
+- Tests: 295 passed local + CI on every final head; ruff clean; frontend
+  browser gate green and enforced in CI (setup-node).
+- Benchmark baseline (real CPU): cold init 3.66s, warm OCR 17.02s median,
+  invoice extraction 9.1ms, geometry 3.6ms, unified 16.87s @ 1 init +
+  1 OCR call. Evidence: reports/benchmark-local.md.
 
-## Task queue (ordered)
+## Completed this run
 
-1. [in progress] P0.2 PDF preflight dimensions before bitmap allocation + cumulative pixel budget + tests
-2. P0.3 invoice XLSX XML-illegal char strip (openpyxl 500 today) + test
-3. P0.4 CI: setup-node so the browser gate never silently skips
-4. P0.1 frontend state: corrections keyed per file+page; overlay cleared on page switch; stop/reset explicit
-5. Stage D M5C Vietnamese extraction on new stacked branch `feat/m5c-vietnamese-documents` (lexicon module, đ/VND currency standalone-token rules, date/number labels, fixtures, English regression)
-6. M5D benchmark script + one local real run (cold/warm/init-count)
-7. Update this checkpoint; user asked: shutdown machine when all done, else sleep
+- [x] Stage 0.2 PDF preflight (MediaBox before bitmap; 15000pt/30MP/60MP budgets)
+- [x] Stage 0.3 invoice XLSX XML-illegal char strip (was a 500)
+- [x] Stage 0.1 frontend state: corrections per file+page, overlay cleanup,
+      reset per active doc, unsaved-count indicator
+- [x] Stage 0.4 CI setup-node + browser gate as an explicit step
+- [x] M5C Vietnamese extraction lexicon (diacritic-fold, đ-safety, VND)
+      + 18 tests, English regression green
+- [x] M5D benchmark harness + first honest baseline; conclusion recorded:
+      warm OCR dominates; no code-tuning optimization justified without
+      a model-selection decision
 
-## Verification commands
+## Remaining backlog (future runs; mission Stages E–H etc.)
 
-- `python scripts/verify.py` (ruff + frontend gate + pytest)
-- CI: ruff + pytest on Python 3.12 (fastapi/httpx/pypdfium2 included)
+- Stage E full fault-tolerance sweep; Stage F review workspace UX
+  (side-by-side, review statuses); Stage G table robustness (thin/thick
+  lines, skew); Stage H release/portfolio docs + screenshots
+- Optional: Vietnamese OCR recognition validation with lang='vi' model
+  (requires benchmarked model decision — see D5 reality check)
+- Real-document evaluation still PENDING user-provided labeled data
 
-## Next exact action
+## Restart instructions
 
-Implement P0.2 in `src/documind/web/pdf.py`: `page.get_size()` preflight
-(width*scale, height*scale, w*h*scale² budgets) before `page.render`,
-cumulative pixel cap, cleanup-on-failure already via TemporaryDirectory
-in caller; add raw-bytes large-MediaBox PDF test (no bitmap allocated).
+1. `git checkout feat/m5d-performance && git pull`
+2. Verify gates: `python scripts/verify.py` (ruff + browser gate + pytest)
+3. Pick the next backlog item above; create a stacked branch off the
+   current head; follow AGENTS.md and .agents/skills/*.
+
+## Machine action
+
+User instruction: when the queue is complete, shut the machine down
+(fallback: sleep). Executed at the end of this run.
