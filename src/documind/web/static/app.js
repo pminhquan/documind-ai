@@ -485,14 +485,18 @@ function buildExportPayload(kind) {
   if (kind === "ocr-txt") {
     return { kind, data: machine.ocr || {}, filename: "ocr-result.txt" };
   }
-  if (kind === "invoice-json") {
+  if (kind.startsWith("invoice")) {
+    // invoice-csv / invoice-xlsx must carry the INVOICE payload (the
+    // server reads data.machine_output.invoice); routing them through
+    // the tables fallthrough below exported a near-empty invoice.
+    const extension = kind.split("-")[1];
     return {
       kind,
       data: applyCorrections({
         machine_output: machine.invoice || null,
         user_corrections: pickCorrections("invoice."),
       }),
-      filename: "invoice-result.json",
+      filename: `invoice-result.${extension}`,
     };
   }
   if (kind === "batch-zip") {
@@ -517,17 +521,27 @@ function buildExportPayload(kind) {
     }
     return { kind, data: { files }, filename: "batch-exports.zip" };
   }
+  // Table corrections are recorded with their full server-side path
+  // (tables[T].cells[R][C]) and must be sent VERBATIM: stripping the
+  // prefix produced "[T].cells[R][C]", which the server rejects with 422.
+  const tableNames = {
+    "table-json": "tables-result.json",
+    "table-csv": "tables.csv",
+    "table-xlsx": "tables.xlsx",
+  };
   const tablesPayload = {
     machine_output: machine.tables || null,
-    user_corrections: pickCorrections("tables"),
+    user_corrections: pickCorrections("tables[", true),
   };
-  return { kind, data: tablesPayload, filename: "tables-result" };
+  return { kind, data: tablesPayload, filename: tableNames[kind] };
 }
 
-function pickCorrections(prefix) {
+function pickCorrections(prefix, keepPrefix = false) {
   const picked = {};
   Object.entries(activeCorrections()).forEach(([key, value]) => {
-    if (key.startsWith(prefix)) picked[key.slice(prefix.length)] = value;
+    if (key.startsWith(prefix)) {
+      picked[keepPrefix ? key : key.slice(prefix.length)] = value;
+    }
   });
   return picked;
 }
