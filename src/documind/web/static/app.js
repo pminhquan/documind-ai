@@ -3,11 +3,15 @@
 
 const state = {
   files: [],         // batch queue (1..10 documents)
+  file: null,        // primary document (used for preview and export names)
   imageUrl: null,
   naturalWidth: 0,
   naturalHeight: 0,
   machine: null,     // untouched model output for the active document/page
-  activeDocKey: null, // "filename#pageLabel" — corrections never leak across docs/pages
+  docIds: new Map(), // File object -> opaque run-local id (filenames are not unique)
+  docIdSeq: 0,
+  activeDocKey: null, // "docN#page_index" — corrections never leak across docs/pages
+  activePageIndex: null, // PDF page_index on screen; null for single-image results
   correctionsByDoc: {}, // { docKey: { fieldPath: value } }
   cancelled: false,
   batchResults: [],  // per-file results in batch mode
@@ -16,6 +20,28 @@ const MAX_BATCH_FILES = 10;
 const WORKFLOW_EXPORT_KIND = { ocr: "ocr-json", invoice: "invoice-json", table: "table-json" };
 
 const $ = (id) => document.getElementById(id);
+
+function assignDocumentIds(files) {
+  state.docIds = new Map();
+  state.docIdSeq = 0;
+  files.forEach((file) => {
+    state.docIdSeq += 1;
+    state.docIds.set(file, `doc${state.docIdSeq}`);
+  });
+}
+
+function documentId(file) {
+  if (!file) return null;
+  if (!state.docIds.has(file)) {
+    state.docIdSeq += 1;
+    state.docIds.set(file, `doc${state.docIdSeq}`);
+  }
+  return state.docIds.get(file);
+}
+
+function docKeyFor(file, pageIndex) {
+  return `${documentId(file)}#${pageIndex}`;
+}
 
 /* ---------- upload and preview ---------- */
 
@@ -55,11 +81,16 @@ function loadFile(file, allFiles) {
     return;
   }
   state.files = allFiles && allFiles.length > 1 ? allFiles : [file];
+  assignDocumentIds(state.files);
   state.file = file;
   state.machine = null;
   state.correctionsByDoc = {};     // new selection: drop stale edits
-  state.activeDocKey = `${file.name}#0`;
+  state.activeDocKey = docKeyFor(file, 0);
+  state.activePageIndex = null;
   state.batchResults = [];
+  $("batch-export-btn").classList.add("hidden");
+  $("pages-nav").innerHTML = "";
+  $("pages-nav").classList.add("hidden");
   if (state.imageUrl) URL.revokeObjectURL(state.imageUrl);
   state.imageUrl = URL.createObjectURL(file);
 
@@ -97,6 +128,15 @@ $("run-btn").addEventListener("click", async () => {
   $("run-btn").disabled = true;
   $("stop-btn").classList.remove("hidden");
   state.cancelled = false;
+  state.correctionsByDoc = {};  // a fresh run invalidates previous-run edits
+  state.activeDocKey = null;
+  state.machine = null;  // nothing to display/export until a file succeeds
+  state.activePageIndex = null;
+  state.batchResults = [];  // a new run replaces the previous batch
+  $("results").classList.add("hidden");
+  $("pages-nav").innerHTML = "";
+  $("pages-nav").classList.add("hidden");
+  $("batch-export-btn").classList.add("hidden");
   const batchList = $("batch-status");
   batchList.innerHTML = "";
   batchList.classList.toggle("hidden", state.files.length <= 1);
@@ -122,26 +162,34 @@ $("run-btn").addEventListener("click", async () => {
         }
         const result = await response.json();
         state.machine = result;
-        state.activeDocKey = `${file.name}#0`;  // fresh machine output
+        state.file = file;  // active document drives page keys and export names
+        state.activePageIndex = null;
+        state.activeDocKey = docKeyFor(file, 0);  // fresh machine output
         state.batchResults.push({
+          docId: documentId(file),
           filename: file.name,
+          workflow,
           kind: exportKindFor(workflow, result),
-          data: exportDataFor(workflow, result),
+          result,
         });
         entry.textContent = `${file.name}: ok`;
-        renderResults(workflow);
+        renderResults();
       } catch (fileError) {
         entry.textContent = `${file.name}: FAILED - ${fileError.message}`;
-        state.batchResults.push({ filename: file.name, kind: "ocr-json",
-                                  data: {}, error: fileError.message });
+        state.batchResults.push({ docId: documentId(file),
+                                  filename: file.name, kind: "ocr-json",
+                                  error: fileError.message });
       }
     }
     const ok = state.batchResults.filter((r) => !r.error).length;
-    setStatus(`Done (${ok}/${state.batchResults.length} succeeded). ` +
+    const shown = ok && state.file ? ` Showing ${state.file.name}.` : "";
+    setStatus(`Done (${ok}/${state.batchResults.length} succeeded).${shown} ` +
               "Machine output shown - edit fields to add corrections.");
   } finally {
     $("run-btn").disabled = false;
     $("stop-btn").classList.add("hidden");
+    $("batch-export-btn").classList.toggle(
+      "hidden", state.files.length <= 1 || state.batchResults.length === 0);
   }
 });
 
@@ -151,63 +199,148 @@ $("stop-btn").addEventListener("click", () => {
 });
 
 function exportKindFor(workflow, result) {
-  if (result.kind === "pdf") return "ocr-json";
+  if (isPdfResult(result)) return "ocr-json";
   return WORKFLOW_EXPORT_KIND[workflow] || "ocr-json";
 }
 
-function exportDataFor(workflow, result) {
-  if (result.kind === "pdf") {
-    return { pages: result.pages.map((page) => ({
-      page_index: page.page_index, ocr: page.ocr || null })) };
+function isPdfResult(result) {
+  return Boolean(result) && result.kind === "pdf";
+}
+
+function resolveActiveResult() {
+  const machine = state.machine;
+  if (!machine) return null;
+  if (!isPdfResult(machine)) return machine;
+  const page = machine.pages.find(
+    (candidate) => candidate.page_index === state.activePageIndex);
+  return page && !page.error ? page : null;
+}
+
+function activePageNumber() {
+  if (!isPdfResult(state.machine)) return null;
+  const page = resolveActiveResult();
+  return page ? page.page_index + 1 : null;
+}
+
+function exportDataFor(workflow, result, correctionsByPage = {}) {
+  if (isPdfResult(result)) {
+    return {
+      kind: "pdf",
+      page_count: result.page_count,
+      workflows: result.workflows,
+      errors: result.errors || [],
+      pages: result.pages.map((page) => {
+        if (page.error) {
+          return { page_index: page.page_index, error: page.error };
+        }
+        return {
+          page_index: page.page_index,
+          source: page.source,
+          ocr: page.ocr || null,
+          invoice: page.invoice || null,
+          tables: page.tables || null,
+          user_corrections: correctionsByPage[String(page.page_index)] || {},
+        };
+      }),
+    };
   }
+  const corrections = correctionsByPage["0"] || {};
   if (workflow === "ocr") return result.ocr || {};
-  if (workflow === "invoice") return { machine_output: result.invoice || null };
-  return { machine_output: result.tables || null };
+  if (workflow === "invoice") {
+    return {
+      machine_output: result.invoice || null,
+      user_corrections: corrections,
+    };
+  }
+  if (workflow === "table") {
+    return {
+      machine_output: result.tables || null,
+      user_corrections: corrections,
+    };
+  }
+  // Auto (unified) results: keep every generated artifact, never just tables.
+  return {
+    workflow: "auto",
+    ocr: result.ocr || null,
+    invoice: result.invoice || null,
+    tables: result.tables || null,
+    user_corrections: corrections,
+  };
 }
 
 function renderPdf(data) {
   const nav = $("pages-nav");
+  const successfulPages = data.pages.filter((page) => !page.error);
+  if (!successfulPages.some((page) => page.page_index === state.activePageIndex)) {
+    state.activePageIndex = successfulPages.length
+      ? successfulPages[0].page_index : null;
+  }
   nav.innerHTML = "";
-  nav.classList.remove("hidden");
-  data.pages.forEach((page, index) => {
+  nav.classList.toggle("hidden", successfulPages.length === 0);
+  data.pages.forEach((page) => {
     if (page.error) return;
     const tab = document.createElement("button");
     tab.className = "tab";
     tab.textContent = `Page ${page.page_index + 1}`;
     tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-selected", index === 0 ? "true" : "false");
-    tab.addEventListener("click", () => {
-      nav.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", "false"));
-      tab.setAttribute("aria-selected", "true");
-      // page switch: point corrections at this page and drop stale boxes
-      state.activeDocKey = `${state.file.name}#${page.page_index}`;
-      clearOverlay();
-      renderResults(data.workflows, page);
-    });
+    tab.dataset.pageIndex = String(page.page_index);
+    tab.setAttribute("aria-selected",
+      page.page_index === state.activePageIndex ? "true" : "false");
+    tab.addEventListener("click", () => selectPage(page.page_index));
     nav.appendChild(tab);
   });
-  const first = data.pages.find((page) => !page.error);
-  if (first) {
-    state.activeDocKey = `${state.file.name}#${first.page_index}`;
+  if (!successfulPages.length) {
+    state.activeDocKey = docKeyFor(state.file, 0);
+    $("results").classList.remove("hidden");
+    $("ocr-panel").classList.add("hidden");
+    $("invoice-panel").classList.add("hidden");
+    $("tables-panel").classList.add("hidden");
     clearOverlay();
-    renderResults(data.workflows, first);
+    setStatus("No page in this PDF produced a result.", true);
+    return;
   }
+  selectPage(state.activePageIndex);
 }
 
-function renderResults(workflow, pageOverride) {
-  const data = pageOverride || state.machine;
-  if (data.kind === "pdf") {
+function selectPage(pageIndex) {
+  state.activePageIndex = pageIndex;
+  const page = resolveActiveResult();
+  if (!page) {
+    setStatus(`Page ${pageIndex + 1} is not available.`, true);
+    return;
+  }
+  state.activeDocKey = docKeyFor(state.file, page.page_index);
+  $("pages-nav").querySelectorAll(".tab").forEach((tab) => {
+    tab.setAttribute("aria-selected",
+      tab.dataset.pageIndex === String(page.page_index) ? "true" : "false");
+  });
+  clearOverlay();
+  renderPanelData(page);
+}
+
+function renderResults() {
+  const data = state.machine;
+  if (!data) return;
+  if (isPdfResult(data)) {
     renderPdf(data);
     return;
   }
+  state.activePageIndex = null;
+  const nav = $("pages-nav");
+  nav.innerHTML = "";
+  nav.classList.add("hidden");
+  renderPanelData(data);
+}
+
+function renderPanelData(result) {
   $("results").classList.remove("hidden");
-  $("ocr-panel").classList.toggle("hidden", !data.ocr);
-  $("invoice-panel").classList.toggle("hidden", !data.invoice);
-  $("tables-panel").classList.toggle("hidden", !data.tables);
-  if (!data.ocr) clearOverlay();  // no OCR on this page: old boxes must not linger
-  if (data.ocr) renderOcr(data.ocr);
-  if (data.invoice) renderInvoice(data.invoice);
-  if (data.tables) renderTables(data.tables);
+  $("ocr-panel").classList.toggle("hidden", !result.ocr);
+  $("invoice-panel").classList.toggle("hidden", !result.invoice);
+  $("tables-panel").classList.toggle("hidden", !result.tables);
+  if (!result.ocr) clearOverlay();  // no OCR on this page: old boxes must not linger
+  if (result.ocr) renderOcr(result.ocr);
+  if (result.invoice) renderInvoice(result.invoice);
+  if (result.tables) renderTables(result.tables);
 }
 
 /* ---------- OCR panel + bounding boxes ---------- */
@@ -278,15 +411,18 @@ function renderInvoice(invoice) {
     const cell = document.createElement("td");
     const input = document.createElement("input");
     input.type = "text";
-    input.value = data[field] === null || data[field] === undefined ? "" : data[field];
+    const path = `invoice.${field}`;
+    const correction = correctionEntry(path);
+    input.value = displayValue(data[field], correction);
     input.id = `invoice-${field}`;
     input.setAttribute("aria-label", `Invoice field ${field}`);
     input.addEventListener("input", () => {
-      recordCorrection(`invoice.${field}`, input.value === "" ? null : input.value);
+      recordCorrection(path, input.value === "" ? null : input.value);
       markEdited(input, field);
     });
     attachProvenanceHighlight(input, invoice.provenance && invoice.provenance[field]);
     cell.appendChild(input);
+    if (correction.present) markEdited(input, field);
     row.appendChild(label);
     row.appendChild(cell);
     tbody.appendChild(row);
@@ -300,17 +436,19 @@ function renderInvoice(invoice) {
       const cell = document.createElement("td");
       const input = document.createElement("input");
       input.type = "text";
-      input.value = item[key] === null || item[key] === undefined ? "" : item[key];
+      const path = `invoice.line_items[${index}].${key}`;
+      const correction = correctionEntry(path);
+      input.value = displayValue(item[key], correction);
       input.setAttribute("aria-label", `Line item ${index} ${key}`);
       input.addEventListener("input", () => {
-        recordCorrection(`invoice.line_items[${index}].${key}`,
-                         input.value === "" ? null : input.value);
+        recordCorrection(path, input.value === "" ? null : input.value);
         markEdited(input, `item ${index} ${key}`);
       });
       const provKey = `line_items[${index}].${key}`;
       attachProvenanceHighlight(input,
         invoice.provenance && invoice.provenance[provKey]);
       cell.appendChild(input);
+      if (correction.present) markEdited(input, `item ${index} ${key}`);
       row.appendChild(cell);
     });
     itemsBody.appendChild(row);
@@ -330,11 +468,24 @@ function activeCorrections() {
   return state.correctionsByDoc[state.activeDocKey] || {};
 }
 
+function correctionEntry(path) {
+  const corrections = activeCorrections();
+  if (Object.prototype.hasOwnProperty.call(corrections, path)) {
+    return { present: true, value: corrections[path] };
+  }
+  return { present: false, value: null };
+}
+
+function displayValue(machineValue, correction) {
+  const value = correction.present ? correction.value : machineValue;
+  return value === null || value === undefined ? "" : value;
+}
+
 function updateCorrectionCount() {
   const count = Object.keys(activeCorrections()).length;
   const status = $("status");
   if (status && count && !status.classList.contains("error")) {
-    status.textContent = `${count} unsaved correction(s) on ${state.activeDocKey}`;
+    status.textContent = `${count} unsaved correction(s) on ${describeActive()}`;
   }
 }
 
@@ -372,23 +523,39 @@ function markEdited(input, label) {
   marker.setAttribute("aria-label", `Corrected ${label}`);
 }
 
-$("invoice-reset").addEventListener("click", () => {
+function resetCorrectionPrefix(prefix) {
   const key = state.activeDocKey;
-  if (key && state.correctionsByDoc[key]) {
-    state.correctionsByDoc[key] = Object.fromEntries(
-      Object.entries(state.correctionsByDoc[key])
-        .filter(([path]) => !path.startsWith("invoice.")));
+  if (!key || !state.correctionsByDoc[key]) return;
+  state.correctionsByDoc[key] = Object.fromEntries(
+    Object.entries(state.correctionsByDoc[key])
+      .filter(([path]) => !path.startsWith(prefix)));
+}
+
+function describeActive() {
+  const name = (state.file && state.file.name) || "this document";
+  const pageNumber = activePageNumber();
+  return pageNumber === null ? name : `${name} page ${pageNumber}`;
+}
+
+$("invoice-reset").addEventListener("click", () => {
+  const active = resolveActiveResult();
+  if (!active || !active.invoice) {
+    setStatus("No invoice result is selected to reset.", true);
+    return;
   }
-  renderInvoice(state.machine.invoice);
+  resetCorrectionPrefix("invoice.");
+  renderInvoice(active.invoice);
+  setStatus(`Invoice corrections reset for ${describeActive()}.`);
 });
 $("tables-reset").addEventListener("click", () => {
-  const key = state.activeDocKey;
-  if (key && state.correctionsByDoc[key]) {
-    state.correctionsByDoc[key] = Object.fromEntries(
-      Object.entries(state.correctionsByDoc[key])
-        .filter(([path]) => !path.startsWith("tables")));
+  const active = resolveActiveResult();
+  if (!active || !active.tables) {
+    setStatus("No table result is selected to reset.", true);
+    return;
   }
-  renderTables(state.machine.tables);
+  resetCorrectionPrefix("tables");
+  renderTables(active.tables);
+  setStatus(`Table corrections reset for ${describeActive()}.`);
 });
 
 /* ---------- tables panel (human-in-the-loop) ---------- */
@@ -428,15 +595,19 @@ function renderTables(tablesResponse) {
         const td = document.createElement("td");
         const input = document.createElement("input");
         input.type = "text";
-        input.value = cell ? cell.text : "";
+        const path = `tables[${tableIndex}].cells[${r}][${c}]`;
+        const correction = correctionEntry(path);
+        input.value = correction.present
+          ? String(correction.value ?? "")
+          : (cell ? cell.text : "");
         input.setAttribute("aria-label",
           `${table.table_id} cell ${r},${c}`);
         input.addEventListener("input", () => {
-          recordCorrection(`tables[${tableIndex}].cells[${r}][${c}]`,
-                           input.value);
+          recordCorrection(path, input.value);
           markEdited(input, `${table.table_id} ${r},${c}`);
         });
         td.appendChild(input);
+        if (correction.present) markEdited(input, `${table.table_id} ${r},${c}`);
         row.appendChild(td);
       }
       body.appendChild(row);
@@ -455,8 +626,8 @@ function renderTables(tablesResponse) {
 document.querySelectorAll("[data-export]").forEach((button) => {
   button.addEventListener("click", async () => {
     const kind = button.dataset.export;
-    const payload = buildExportPayload(kind);
     try {
+      const payload = buildExportPayload(kind);
       const response = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -477,63 +648,133 @@ document.querySelectorAll("[data-export]").forEach((button) => {
   });
 });
 
+function imageExportName(kind) {
+  const names = {
+    "ocr-json": "ocr-result.json",
+    "ocr-txt": "ocr-result.txt",
+    "invoice-json": "invoice-result.json",
+    "invoice-csv": "invoice-result.csv",
+    "invoice-xlsx": "invoice-result.xlsx",
+    "table-json": "tables-result.json",
+    "table-csv": "tables.csv",
+    "table-xlsx": "tables.xlsx",
+  };
+  return names[kind];
+}
+
+function exportBaseName() {
+  const name = (state.file && state.file.name) || "document";
+  const stem = name.replace(/\.[^.]+$/, "");
+  const safe = stem.replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^[._]+|[._]+$/g, "");
+  return safe || "document";
+}
+
+function pageExportName(kind, pageNumber, tableCount = 1) {
+  const suffixes = {
+    "ocr-json": "ocr.json",
+    "ocr-txt": "ocr.txt",
+    "invoice-json": "invoice.json",
+    "invoice-csv": "invoice.csv",
+    "invoice-xlsx": "invoice.xlsx",
+    "table-json": "tables.json",
+    "table-csv": "tables.csv",
+    "table-xlsx": "tables.xlsx",
+  };
+  // Multi-table CSV exports are ZIP archives server-side; a .csv name
+  // would hide that from the user.
+  const suffix = kind === "table-csv" && tableCount > 1
+    ? "tables.zip" : suffixes[kind];
+  return `${exportBaseName()}-page-${pageNumber}-${suffix}`;
+}
+
+function missingResultError(kind, pageNumber) {
+  const subject = pageNumber === null ? "This document" : `Page ${pageNumber}`;
+  const label = kind.startsWith("invoice") ? "invoice"
+    : kind.startsWith("table") ? "table" : "OCR";
+  return new Error(`${subject} has no ${label} result to export.`);
+}
+
 function buildExportPayload(kind) {
-  const machine = state.machine || {};
-  if (kind === "ocr-json") {
-    return { kind, data: machine.ocr || {}, filename: "ocr-result.json" };
+  if (kind === "batch-zip") return buildBatchPayload();
+  const active = resolveActiveResult();
+  if (!active) {
+    throw new Error("No successful result is selected to export.");
   }
-  if (kind === "ocr-txt") {
-    return { kind, data: machine.ocr || {}, filename: "ocr-result.txt" };
+  const pageNumber = activePageNumber();
+  const fileNameFor = (tableCount = 1) => pageNumber === null
+    ? imageExportName(kind) : pageExportName(kind, pageNumber, tableCount);
+
+  if (kind === "ocr-json" || kind === "ocr-txt") {
+    if (!active.ocr) throw missingResultError(kind, pageNumber);
+    return { kind, data: active.ocr, filename: fileNameFor() };
   }
   if (kind.startsWith("invoice")) {
     // invoice-csv / invoice-xlsx must carry the INVOICE payload (the
     // server reads data.machine_output.invoice); routing them through
     // the tables fallthrough below exported a near-empty invoice.
-    const extension = kind.split("-")[1];
+    if (!active.invoice) throw missingResultError(kind, pageNumber);
     return {
       kind,
-      data: applyCorrections({
-        machine_output: machine.invoice || null,
+      data: {
+        machine_output: active.invoice,
         user_corrections: pickCorrections("invoice."),
-      }),
-      filename: `invoice-result.${extension}`,
+      },
+      filename: fileNameFor(),
     };
-  }
-  if (kind === "batch-zip") {
-    // Success-only file list; failures are exported explicitly as an
-    // error report instead of silently becoming fake OCR results.
-    const succeeded = state.batchResults.filter((result) => !result.error);
-    const failed = state.batchResults.filter((result) => result.error);
-    const files = succeeded.map((result, index) => {
-      const stem = (result.filename || `doc_${index}`).replace(/\.[^.]+$/, "");
-      const extension = result.kind.split("-")[1] === "json" ? "json"
-        : result.kind.split("-")[1];
-      return { kind: result.kind, filename: `${stem}.${extension}`,
-               data: result.data };
-    });
-    if (failed.length) {
-      files.push({
-        kind: "ocr-json",
-        filename: "batch-errors.json",
-        data: { failed_documents: failed.map((result) => ({
-          filename: result.filename, error: result.error })) },
-      });
-    }
-    return { kind, data: { files }, filename: "batch-exports.zip" };
   }
   // Table corrections are recorded with their full server-side path
   // (tables[T].cells[R][C]) and must be sent VERBATIM: stripping the
   // prefix produced "[T].cells[R][C]", which the server rejects with 422.
-  const tableNames = {
-    "table-json": "tables-result.json",
-    "table-csv": "tables.csv",
-    "table-xlsx": "tables.xlsx",
+  if (!active.tables) throw missingResultError(kind, pageNumber);
+  return {
+    kind,
+    data: {
+      machine_output: active.tables,
+      user_corrections: pickCorrections("tables[", true),
+    },
+    filename: fileNameFor((active.tables.tables || []).length),
   };
-  const tablesPayload = {
-    machine_output: machine.tables || null,
-    user_corrections: pickCorrections("tables[", true),
-  };
-  return { kind, data: tablesPayload, filename: tableNames[kind] };
+}
+
+function correctionsForDocument(docId) {
+  const prefix = `${docId}#`;
+  const byPage = {};
+  Object.entries(state.correctionsByDoc).forEach(([docKey, corrections]) => {
+    if (docKey.startsWith(prefix)) {
+      byPage[docKey.slice(prefix.length)] = { ...corrections };
+    }
+  });
+  return byPage;
+}
+
+function buildBatchPayload() {
+  const succeeded = state.batchResults.filter((result) => !result.error);
+  const failed = state.batchResults.filter((result) => result.error);
+  const files = succeeded.map((result, index) => {
+    const stem = (result.filename || `doc_${index}`).replace(/\.[^.]+$/, "");
+    const extension = result.kind.split("-")[1] === "json" ? "json"
+      : result.kind.split("-")[1];
+    return {
+      kind: result.kind,
+      filename: `${stem}.${extension}`,
+      data: exportDataFor(
+        result.workflow, result.result, correctionsForDocument(result.docId)),
+    };
+  });
+  // Failures stay explicit; they never become fake OCR/invoice/table data.
+  // Placed first so the reserved batch-errors.json name always belongs to
+  // the error report; a colliding success entry gets a deterministic
+  // suffix from the server's allocator instead.
+  if (failed.length) {
+    files.unshift({
+      kind: "ocr-json",
+      filename: "batch-errors.json",
+      data: { failed_documents: failed.map((result) => ({
+        filename: result.filename, error: result.error })) },
+    });
+  }
+  return { kind: "batch-zip", data: { files }, filename: "batch-exports.zip" };
 }
 
 function pickCorrections(prefix, keepPrefix = false) {
@@ -544,10 +785,6 @@ function pickCorrections(prefix, keepPrefix = false) {
     }
   });
   return picked;
-}
-
-function applyCorrections(payload) {
-  return payload;
 }
 
 function downloadBlob(blob, filename) {

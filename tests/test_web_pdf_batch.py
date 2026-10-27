@@ -226,7 +226,128 @@ class TestBatchZipExport:
         response = client.post("/api/export", json={"kind": "batch-zip",
                                                     "data": payload})
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-            assert len(archive.namelist()) == 2
+            assert sorted(archive.namelist()) == ["same.txt", "same_2.txt"]
+            assert archive.read("same.txt") == b"one"
+            assert archive.read("same_2.txt") == b"two"
+
+    def test_long_duplicate_names_keep_extension(self, client):
+        filename = f"{'x' * 78}.txt"
+        payload = {"files": [
+            {"kind": "ocr-txt", "filename": filename,
+             "data": {"full_text": "one"}},
+            {"kind": "ocr-txt", "filename": filename,
+             "data": {"full_text": "two"}},
+        ]}
+        response = client.post("/api/export", json={"kind": "batch-zip",
+                                                    "data": payload})
+        assert response.status_code == 200
+        stem = "x" * 73  # 80-char cap leaves room for the extension
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert sorted(archive.namelist()) == [f"{stem}.txt",
+                                                  f"{stem}_2.txt"]
+            assert archive.read(f"{stem}.txt") == b"one"
+            assert archive.read(f"{stem}_2.txt") == b"two"
+
+    def test_case_insensitive_duplicates_are_deduplicated(self, client):
+        payload = {"files": [
+            {"kind": "ocr-txt", "filename": "A.json",
+             "data": {"full_text": "one"}},
+            {"kind": "ocr-txt", "filename": "a.json",
+             "data": {"full_text": "two"}},
+            {"kind": "ocr-txt", "filename": "Invoice.json",
+             "data": {"full_text": "three"}},
+            {"kind": "ocr-txt", "filename": "invoice.json",
+             "data": {"full_text": "four"}},
+        ]}
+        response = client.post("/api/export", json={"kind": "batch-zip",
+                                                    "data": payload})
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert sorted(archive.namelist()) == sorted(
+                ["A.json", "a_2.json", "Invoice.json", "invoice_2.json"])
+            contents = {name: archive.read(name).decode()
+                        for name in archive.namelist()}
+        assert contents == {
+            "A.json": "one", "a_2.json": "two",
+            "Invoice.json": "three", "invoice_2.json": "four"}
+
+    def test_sanitized_names_collide_case_insensitively(self, client):
+        payload = {"files": [
+            {"kind": "ocr-txt", "filename": "a b.json",
+             "data": {"full_text": "one"}},
+            {"kind": "ocr-txt", "filename": "a?b.json",
+             "data": {"full_text": "two"}},
+            {"kind": "ocr-txt", "filename": "A_B.json",
+             "data": {"full_text": "three"}},
+        ]}
+        response = client.post("/api/export", json={"kind": "batch-zip",
+                                                    "data": payload})
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert sorted(archive.namelist()) == sorted(
+                ["a_b.json", "a_b_2.json", "A_B_3.json"])
+            contents = {name: archive.read(name).decode()
+                        for name in archive.namelist()}
+        assert contents == {
+            "a_b.json": "one", "a_b_2.json": "two", "A_B_3.json": "three"}
+
+    def test_long_names_stay_within_limit_after_suffixing(self, client):
+        payload = {"files": [
+            {"kind": "ocr-txt", "filename": "x" * 80,
+             "data": {"full_text": "one"}},
+            {"kind": "ocr-txt", "filename": "x" * 80,
+             "data": {"full_text": "two"}},
+            {"kind": "ocr-txt", "filename": f"{'y' * 80}.txt",
+             "data": {"full_text": "three"}},
+            {"kind": "ocr-txt", "filename": f"{'y' * 80}.txt",
+             "data": {"full_text": "four"}},
+            {"kind": "ocr-txt", "filename": f"{'y' * 80}.txt",
+             "data": {"full_text": "five"}},
+        ]}
+        response = client.post("/api/export", json={"kind": "batch-zip",
+                                                    "data": payload})
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = archive.namelist()
+            assert len(names) == len(set(name.lower() for name in names)) == 5
+            assert all(len(name) <= 80 for name in names)
+            assert sum(name.endswith(".txt") for name in names) == 3
+            contents = {archive.read(name).decode() for name in names}
+        assert contents == {"one", "two", "three", "four", "five"}
+
+    def test_ten_long_names_reach_counter_ten_within_limit(self, client):
+        payload = {"files": [
+            {"kind": "ocr-txt", "filename": f"{'z' * 80}.txt",
+             "data": {"full_text": str(index)}} for index in range(10)
+        ]}
+        response = client.post("/api/export", json={"kind": "batch-zip",
+                                                    "data": payload})
+        assert response.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = archive.namelist()
+            assert len(names) == 10
+            assert len({name.lower() for name in names}) == 10
+            assert all(len(name) <= 80 for name in names)
+            assert all(name.endswith(".txt") for name in names)
+            assert names[0] == f"{'z' * 73}.txt"
+            assert names[-1] == f"{'z' * 73}_10.txt"
+            contents = {archive.read(name).decode() for name in names}
+        assert contents == {str(index) for index in range(10)}
+
+    def test_existing_suffix_names_are_skipped(self, client):
+        payload = {"files": [
+            {"kind": "ocr-txt", "filename": "a_2.txt",
+             "data": {"full_text": "one"}},
+            {"kind": "ocr-txt", "filename": "a.txt",
+             "data": {"full_text": "two"}},
+            {"kind": "ocr-txt", "filename": "a.txt",
+             "data": {"full_text": "three"}},
+        ]}
+        response = client.post("/api/export", json={"kind": "batch-zip",
+                                                    "data": payload})
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = archive.namelist()
+            contents = {name: archive.read(name).decode() for name in names}
+        assert names == ["a_2.txt", "a.txt", "a_3.txt"]
+        assert contents == {"a_2.txt": "one", "a.txt": "two",
+                            "a_3.txt": "three"}
 
     def test_too_many_files_422(self, client):
         payload = {"files": [
