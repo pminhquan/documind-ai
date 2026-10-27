@@ -81,13 +81,64 @@ process (partial success). The single-page extractor does not infer
 cross-page relationships — per-page results are intentionally separate.
 Page images live in a temp directory removed after processing.
 
+### PDF page-level exports (D-18, client-orchestrated)
+
+For a PDF result the UI exports **the selected page only** — never the
+whole-document object read as if it were an image. The active page is
+tracked by `page_index` (not array position), and package exports are
+named `<stem>-page-<N>-<artifact>.<ext>` (N = `page_index + 1`), e.g.
+`document-page-1-invoice.csv`, `document-page-2-tables.xlsx`. If the
+selected page has no result for the requested artifact, the UI reports
+a clear error instead of generating an empty financial export. A page
+with several tables exports `table-csv` as
+`<stem>-page-<N>-tables.zip` (the server packages multiple tables as a
+ZIP archive). Image results keep the pre-D-18 payload shapes and
+filenames (`invoice-result.csv`, `tables.csv`, ...).
+
+Corrections stay isolated per document/page (`filename#page_index`):
+switching pages restores the corrected values and edited markers, and
+Reset Invoice / Reset Tables remove only that page's corrections of the
+matching family. Machine output is never mutated.
+
 ### Batch processing (M5B, client-orchestrated)
 
 The UI processes up to **10 files per batch run sequentially** (one
 document in memory at a time), showing per-file status with error
-isolation, partial success, and a Stop button. Batch results export via
-`batch-zip` (≤ 10 entries, sanitized deduplicated names, per-entry kind
-validation). No job queues or databases.
+isolation, partial success, and a Stop button. A batch run replaces the
+previous run's results. Batch results export via `batch-zip` (≤ 10
+entries, sanitized deduplicated names, per-entry kind validation)
+through the "Export batch ZIP" control, shown once a multi-file run has
+produced results. No job queues or databases.
+
+Each successfully processed PDF contributes **one** JSON entry (`kind:
+"ocr-json"`) carrying the complete page-level result rather than an
+uncontrolled number of CSV/XLSX files:
+
+```json
+{
+  "kind": "pdf",
+  "page_count": 2,
+  "workflows": ["ocr", "invoice", "table"],
+  "errors": ["page 0: <message>"],
+  "pages": [
+    {"page_index": 0, "error": "<message>"},
+    {
+      "page_index": 1,
+      "source": "upload#page1",
+      "ocr": {...},
+      "invoice": {...},
+      "tables": {...},
+      "user_corrections": {"invoice.total": "20.00"}
+    }
+  ]
+}
+```
+
+Failed pages carry only `page_index` and `error` — no fabricated OCR,
+invoice, or table records. `user_corrections` is kept separate from the
+machine result and is page-local; data from different PDFs/images never
+mixes. Image batch entries keep their previous per-workflow shape, while
+processing failures remain in `batch-errors.json`.
 
 ### Corrections materialization (CSV/XLSX)
 
@@ -131,7 +182,10 @@ export kind, `500` inference failure (message without OCR content).
 ## Human-in-the-loop corrections
 
 The UI never overwrites machine output. Corrections are collected
-client-side keyed by field path (`invoice.total`,
-`tables[0].cells[2][1]`, ...) and exported **alongside** the original
-machine output in JSON exports. Ground truth in `data/eval/` is never
-touched by the web app.
+client-side keyed by document/page (`filename#page_index`) and field
+path (`invoice.total`, `tables[0].cells[2][1]`, ...), then exported
+**alongside** the original machine output in JSON exports. CSV/XLSX
+export materializes only the selected page's corrections into a fresh
+copy. Revisiting a page re-applies its stored corrections and edited
+markers; Reset removes one correction family for the active page only.
+Ground truth in `data/eval/` is never touched by the web app.
