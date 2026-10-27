@@ -1,7 +1,12 @@
-# DocuMind AI — Architecture (M0/M1/M2)
+# DocuMind AI — Core Pipeline Architecture (M0–M2)
 
-Trạng thái hiện tại: **baseline OCR + extraction tối giản, CPU-first**,
-chưa có API/DB/frontend.
+> **Scope note:** this document describes the original OCR/extraction core
+> (M0–M2) and is kept for its design rationale. The current product also
+> includes ruled tables (M3A), evaluation (M4A), dataset onboarding (M4B
+> Phase 1), the local web app (M5A/M5B, including D-18), Vietnamese
+> extraction rules (M5C), and performance benchmarking (M5D). For current
+> status, architecture, and commands, see [HANDOFF.md](../HANDOFF.md).
+> The API and frontend **exist**; a database does **not**.
 
 ## Sơ đồ module
 
@@ -81,8 +86,11 @@ hoàn toàn deterministic.
 - **CPU-first**: tắt các bước classify/unwarp của PaddleOCR để baseline
   nhẹ; chưa có giả định GPU.
 
-## Ranh giới phạm vi (M0–M2)
+## Ranh giới phạm vi lịch sử (M0–M2)
 
-Đã có: OCR baseline, trích xuất hoá đơn deterministic (M2).
-Chưa có: tái tạo bảng (M3), database, API, frontend, đánh giá accuracy
-(cần ground-truth có nhãn, M4).
+Tại thời điểm tài liệu này được viết: đã có OCR baseline và trích xuất
+hoá đơn deterministic (M2); chưa có tái tạo bảng (M3), evaluation (M4),
+API hay frontend. Hiện tại M3A/M4A/M4B Phase 1/M5A/M5B (gồm D-18) đã
+hoàn thành; M5C (quy tắc trích xuất tiếng Việt) và M5D (benchmark hiệu
+năng) cũng đã xong. Database vẫn chưa có và real-document accuracy vẫn
+đang chờ dữ liệu gán nhãn (M4B Phase 2).

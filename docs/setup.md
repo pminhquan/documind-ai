@@ -45,15 +45,13 @@ python -V   # phải là 3.12.x và trỏ tới .venv\Scripts\python.exe
 ```powershell
 python -m pip install --upgrade pip
 pip install -e ".[dev]"        # paddlepaddle (CPU) + paddleocr + pillow + pytest
+pip install -e ".[web]"        # FastAPI stack; also required to run the web tests locally
 ```
 
-File `requirements.lock.txt` ghi lại đúng các phiên bản đã được kiểm chứng
-trong môi trường phát triển; muốn tái tạo y nguyên (chạy từ thư mục gốc
-của repository — lock file tham chiếu chính project qua `-e .`):
-
-```powershell
-pip install -r requirements.lock.txt
-```
+`requirements.lock.txt` là ảnh chụp môi trường lịch sử, **không phải**
+installer cho checkout hiện tại: nó ghim chính project vào một commit cũ
+(`-e git+https://github.com/pminhquan/documind-ai.git@ab62d749...`), trước
+cả M5A. Luôn dùng lệnh editable install ở trên để chạy đúng `src/` hiện tại.
 
 ## 5. Xác minh cài đặt
 
