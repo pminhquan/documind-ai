@@ -80,9 +80,14 @@ Short receipts often print **no header** (`COFFEE 25.000` directly
 followed by `TOTAL 25.000`). For those documents the region is selected
 by content, never by a fixed line number:
 
-1. Scan rows until the first summary row. Document-metadata rows do not
-   open the summary zone (e.g. `Tax ID: ...`), but genuine summary labels
-   remain authoritative and always end the item region.
+1. Scan rows until the first summary boundary. A row that is both
+   payment metadata and a tender summary (`CARD PAYMENT 25.00`) is a
+   boundary: it ends the item region, and the summary pass still reads it
+   as a tender row. Other metadata rows are never boundaries, even when
+   their text contains a summary keyword (`Tax ID: ...`, `MST: ...`,
+   `Số hóa đơn: ...`, `HÓA ĐƠN VAT: ...`, `Tên cửa hàng: Total Mart`).
+   Genuine summary labels remain authoritative and always end the item
+   region.
 2. A row is an item candidate only when it carries both a product-like
    description (at least two letters, left of the amount) and monetary
    evidence: a whole-token amount, an explicit `qty x price` token, or a
@@ -151,7 +156,12 @@ labels. Summary rows (`subtotal`, `tax`, `discount`, `cash`, `payment`,
 `change`, `total`, and their Vietnamese labels) are never items.
 Tax-identifier rows (`Tax ID:`, `MST:`, `Mã số thuế:`, `VAT code:`) are
 ignored by summary parsing, so they are never read as a monetary tax;
-tender rows such as `CARD PAYMENT 110.00` remain summary-eligible.
+tender rows such as `CARD PAYMENT 110.00` remain summary-eligible. When
+a row satisfies both classifiers (payment-card metadata and tender
+summary), summary precedence applies in the headerless path: the row
+ends the item region instead of being skipped, so rows printed below it
+can never be misread as items, while the summary pass still records the
+tender amount.
 
 Provenance follows the source regions exactly: for a merged product row
 (`COFFEE 25.000` returned as one OCR region), the description and

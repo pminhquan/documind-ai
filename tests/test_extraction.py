@@ -898,6 +898,127 @@ class TestShortHeaderlessReceipts:
         assert invoice.change_amount == money("3500")
         assert invoice.validation_status == STATUS_REVIEW
 
+    def test_payment_row_alone_closes_headerless_item_region(self):
+        result = extract(ocr_doc([
+            [("COFFEE 25.00", 10)],
+            [("CARD PAYMENT 25.00", 10)],
+        ]), source="payment-only")
+        invoice = result.invoice
+        assert [
+            (item.description, item.quantity, item.unit_price, item.line_total)
+            for item in invoice.line_items
+        ] == [("COFFEE", None, None, money("25.00"))]
+        assert invoice.payment_amount == money("25.00")
+        assert invoice.total is None
+        assert result.provenance["line_items[0].line_total"].ocr_index == 0
+        assert invoice.validation_status == STATUS_REVIEW
+
+    def test_payment_row_ends_headerless_region_before_later_rows(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("COFFEE 25.00", 10)],
+            [("CARD PAYMENT 30.00", 10)],
+            [("EXTRA 5.00", 10)],
+            [("TOTAL 25.00", 10)],
+        ]), source="payment-boundary")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == ["COFFEE"]
+        assert invoice.line_items[0].line_total == money("25.00")
+        assert invoice.payment_amount == money("30.00")
+        assert invoice.total == money("25.00")
+        assert result.provenance["line_items[0].description"].ocr_index == 1
+        assert invoice.validation_status == STATUS_OK
+
+    def test_payment_row_above_first_item_yields_no_items(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("CARD PAYMENT 25.00", 10)],
+            [("COFFEE 25.00", 10)],
+            [("TOTAL 25.00", 10)],
+        ]), source="payment-first")
+        invoice = result.invoice
+        assert invoice.line_items == []
+        assert invoice.payment_amount == money("25.00")
+        assert invoice.total == money("25.00")
+
+    def test_tax_id_between_items_does_not_close_the_region(self):
+        result = extract(ocr_doc([
+            [("COFFEE 25.00", 10)],
+            [("Tax ID: 0123456789", 10)],
+            [("COOKIE 10.00", 10)],
+            [("TOTAL 35.00", 10)],
+        ]), source="tax-id")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == [
+            "COFFEE",
+            "COOKIE",
+        ]
+        assert [item.line_total for item in invoice.line_items] == [
+            money("25.00"),
+            money("10.00"),
+        ]
+        assert invoice.tax is None
+        assert invoice.total == money("35.00")
+        assert invoice.validation_status == STATUS_REVIEW
+
+    @pytest.mark.parametrize("metadata_cells", [
+        [("HÓA ĐƠN VAT: 000123", 10)],
+        [("TÊN CỬA HÀNG: TOTAL MART", 10)],
+    ])
+    def test_metadata_row_with_summary_keyword_does_not_close_region(
+        self, metadata_cells
+    ):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            metadata_cells,
+            [("CÀ PHÊ SỮA 25.000", 10)],
+            [("TỔNG CỘNG 25.000", 10)],
+        ]), source="metadata-summary-keyword")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == [
+            "CÀ PHÊ SỮA"
+        ]
+        assert invoice.total == money("25000")
+
+    def test_explicit_header_payment_row_still_ends_item_region(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("ITEM", 10), ("QTY x PRICE LINE TOTAL", 150)],
+            [("SOAP", 10), ("2 x 2.50", 150), ("5.00", 330)],
+            [("CARD PAYMENT", 10), ("5.00", 330)],
+            [("EXTRA", 10), ("5.00", 330)],
+            [("TOTAL", 10), ("5.00", 330)],
+        ]), source="header")
+        invoice = result.invoice
+        assert [
+            (item.description, item.line_total)
+            for item in invoice.line_items
+        ] == [("SOAP", money("5.00"))]
+        assert invoice.payment_amount == money("5.00")
+        assert invoice.total == money("5.00")
+        assert invoice.validation_status == STATUS_OK
+
+    @pytest.mark.parametrize("payment_cells", [
+        [("CARD PAYMENT 25.00", 10)],
+        [("VISA PAYMENT 25.00", 10)],
+        [("DEBIT CARD PAYMENT 25.00", 10)],
+        [("CARD PAYMENT", 10), ("25.00", 330)],
+        [("TIỀN MẶT 25.00", 10)],
+        [("TIỀN KHÁCH ĐƯA", 10), ("25.00", 330)],
+    ])
+    def test_payment_summary_representations_close_the_region(
+        self, payment_cells
+    ):
+        result = extract(ocr_doc([
+            [("COFFEE 25.00", 10)],
+            payment_cells,
+        ]), source="payment")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == ["COFFEE"]
+        assert invoice.line_items[0].line_total == money("25.00")
+        assert invoice.payment_amount == money("25.00")
+        assert invoice.total is None
+
     def test_recovered_items_participate_in_arithmetic_validation(self):
         result = extract(ocr_doc([
             [("COFFEE 25.000", 10)],

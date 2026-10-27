@@ -367,6 +367,21 @@ def _is_summary_line(line: VisualLine) -> bool:
     )
 
 
+def _is_summary_boundary(line: VisualLine) -> bool:
+    """True when a metadata row must end the headerless item region.
+
+    Only payment-card rows qualify: they are document metadata (never
+    an item) *and* tender summary rows, so the summary side wins and
+    the row closes the region while the summary pass still reads it.
+    Other metadata rows that merely contain a summary keyword
+    ("HÓA ĐƠN VAT: ...", "Tên cửa hàng: Total Mart") stay metadata and
+    never end the region.
+    """
+    return bool(PAYMENT_CARD_RE.match(fold_vi(line.text))) and _is_summary_line(
+        line
+    )
+
+
 def _looks_like_phone(text: str) -> bool:
     """True when the row contains a phone-shaped digit run.
 
@@ -587,6 +602,11 @@ class _Extractor:
 
         for line in lines[start:]:
             if headerless:
+                # Summary precedence: a row that is both payment metadata
+                # and a monetary summary ends the region instead of being
+                # silently skipped (which would let later rows leak in).
+                if _is_summary_boundary(line):
+                    break
                 if _is_metadata_line(line):
                     continue
                 has_item_amount = _line_has_item_amount(line)
@@ -625,6 +645,8 @@ class _Extractor:
         first_candidate: VisualLine | None = None
         first_candidate_index: int | None = None
         for index, line in enumerate(lines):
+            if _is_summary_boundary(line):
+                return first_candidate_index
             if _is_metadata_line(line):
                 continue
             if _is_summary_line(line):
