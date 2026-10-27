@@ -95,20 +95,27 @@ with several tables exports `table-csv` as
 ZIP archive). Image results keep the pre-D-18 payload shapes and
 filenames (`invoice-result.csv`, `tables.csv`, ...).
 
-Corrections stay isolated per document/page (`filename#page_index`):
-switching pages restores the corrected values and edited markers, and
+Corrections stay isolated per document and page: each selected file
+instance gets an opaque run-local document id (filenames are display and
+export labels only), and correction keys are `<document-id>#<page_index>`.
+Switching pages restores the corrected values and edited markers, and
 Reset Invoice / Reset Tables remove only that page's corrections of the
-matching family. Machine output is never mutated.
+matching family. Machine output is never mutated. Two files with the
+same filename therefore keep separate corrections and batch entries.
 
 ### Batch processing (M5B, client-orchestrated)
 
 The UI processes up to **10 files per batch run sequentially** (one
 document in memory at a time), showing per-file status with error
-isolation, partial success, and a Stop button. A batch run replaces the
-previous run's results. Batch results export via `batch-zip` (≤ 10
-entries, sanitized deduplicated names, per-entry kind validation)
-through the "Export batch ZIP" control, shown once a multi-file run has
-produced results. No job queues or databases.
+isolation, partial success, and a Stop button. A new run replaces the
+previous run's results **and** its corrections: edits belong to one
+machine-output generation and are never silently re-applied to fresh
+output. A cancelled run exports only the documents it actually
+completed. Batch results export via `batch-zip` (≤ 10 entries including
+the failure report, sanitized deterministically deduplicated names,
+per-entry kind validation) through the "Export batch ZIP" control,
+shown once a multi-file run has produced results. No job queues or
+databases.
 
 Each successfully processed PDF contributes **one** JSON entry (`kind:
 "ocr-json"`) carrying the complete page-level result rather than an
@@ -136,9 +143,26 @@ uncontrolled number of CSV/XLSX files:
 
 Failed pages carry only `page_index` and `error` — no fabricated OCR,
 invoice, or table records. `user_corrections` is kept separate from the
-machine result and is page-local; data from different PDFs/images never
-mixes. Image batch entries keep their previous per-workflow shape, while
-processing failures remain in `batch-errors.json`.
+machine result and is page-local; data from different documents never
+mixes. Each PDF is one entry even when files share a name: ZIP entry
+names are sanitized, capped, and deterministically suffixed (`_2`,
+`_3`, ...) with the extension preserved, so no entry is overwritten
+and every extracted file keeps a usable name.
+
+Image batch entries:
+
+- OCR workflow: the raw `OcrResponse`.
+- Invoice workflow: `{machine_output: InvoiceResponse,
+  user_corrections}` (corrections keep their verbatim paths such as
+  `invoice.total`).
+- Table workflow: `{machine_output: TableResponse, user_corrections}`
+  (paths such as `tables[0].cells[0][0]`).
+- Auto workflow: one full JSON snapshot — `kind: "ocr-json"` with
+  `{workflow: "auto", ocr, invoice, tables, user_corrections}` — so no
+  generated artifact is dropped.
+
+Processing failures remain explicit in `batch-errors.json`; failed
+documents never become fake OCR/invoice/table results.
 
 ### Corrections materialization (CSV/XLSX)
 
@@ -182,10 +206,13 @@ export kind, `500` inference failure (message without OCR content).
 ## Human-in-the-loop corrections
 
 The UI never overwrites machine output. Corrections are collected
-client-side keyed by document/page (`filename#page_index`) and field
-path (`invoice.total`, `tables[0].cells[2][1]`, ...), then exported
-**alongside** the original machine output in JSON exports. CSV/XLSX
-export materializes only the selected page's corrections into a fresh
-copy. Revisiting a page re-applies its stored corrections and edited
-markers; Reset removes one correction family for the active page only.
-Ground truth in `data/eval/` is never touched by the web app.
+client-side keyed by an opaque run-local document id plus `page_index`
+and field path (`invoice.total`, `tables[0].cells[2][1]`, ...), then
+exported **alongside** the original machine output in JSON exports.
+Selecting new documents or starting a new processing run clears the
+previous correction state; page switches and repeated exports within a
+completed run preserve it. CSV/XLSX export materializes only the
+selected page's corrections into a fresh copy. Revisiting a page
+re-applies its stored corrections and edited markers; Reset removes one
+correction family for the active page only. Ground truth in `data/eval/`
+is never touched by the web app.

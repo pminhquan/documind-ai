@@ -73,21 +73,32 @@ def export(client, payload):
     return response
 
 
+def zip_json_entries(response) -> dict:
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        return {name: json.loads(archive.read(name))
+                for name in archive.namelist()}
+
+
 class TestScenarioATwoPagePdf:
     """Corrections survive page switches and are visible with markers."""
 
     def test_page_switch_restores_corrections(self, scenarios):
         data = scenario_data(scenarios, "A")
+        page0_key, page1_key = data["pageKeys"]
         assert data["initial"]["total"] == "10.00"
         assert data["initial"]["cell"] == "10"
         assert data["initial"]["tabs"] == 2
         assert data["initial"]["activePageIndex"] == 0
-        assert data["initial"]["activeDocKey"] == "document.pdf#0"
+        assert data["initial"]["activeDocKey"] == page0_key
+        assert page0_key.endswith("#0")
+        assert "document.pdf" not in page0_key
 
         assert data["page1"]["total"] == "20.00"
         assert data["page1"]["cell"] == "20"
         assert data["page1"]["activePageIndex"] == 1
-        assert data["page1"]["activeDocKey"] == "document.pdf#1"
+        assert data["page1"]["activeDocKey"] == page1_key
+        assert page1_key.endswith("#1")
+        assert page0_key.split("#")[0] == page1_key.split("#")[0]
 
         assert data["page0Again"]["total"] == "100.00"
         assert data["page0Again"]["cell"] == "Apple"
@@ -99,11 +110,11 @@ class TestScenarioATwoPagePdf:
         assert data["page1Again"]["totalEdited"] is True
         assert data["page1Again"]["cellEdited"] is True
 
-        assert data["corrections"]["document.pdf#0"] == {
+        assert data["corrections"][page0_key] == {
             "invoice.total": "100.00",
             "tables[0].cells[0][0]": "Apple",
         }
-        assert data["corrections"]["document.pdf#1"] == {
+        assert data["corrections"][page1_key] == {
             "invoice.total": "200.00",
             "tables[0].cells[0][0]": "Orange",
         }
@@ -245,7 +256,8 @@ class TestScenarioDPartialPdfFailure:
         assert data["tabCount"] == 1
         assert data["tabLabels"] == ["Page 2"]
         assert data["activePageIndex"] == 1
-        assert data["activeDocKey"] == "document.pdf#1"
+        assert data["activeDocKey"].endswith("#1")
+        assert "document.pdf" not in data["activeDocKey"]
         assert data["total"] == "20.00"
 
         payload = data["invoicePayload"]
@@ -283,7 +295,9 @@ class TestScenarioESingleImageRegression:
         assert initial["cell"] == "9.57"
         assert initial["pagesHidden"] is True
         assert initial["activePageIndex"] is None
-        assert initial["activeDocKey"] == "scan.png#0"
+        assert initial["activeDocKey"].endswith("#0")
+        assert "scan.png" not in initial["activeDocKey"]
+        assert "on scan.png" in data["afterEdits"]["status"]
 
         invoice_csv = data["invoiceCsv"]
         assert invoice_csv["filename"] == "invoice-result.csv"
@@ -427,3 +441,295 @@ def test_batch_zip_export_has_a_ui_trigger():
     html = (APP_JS.parent / "index.html").read_text(encoding="utf-8")
     assert 'data-export="batch-zip"' in html
 
+
+class TestDuplicateDocumentIdentity:
+    """Filenames are not identity: two invoice.pdf files stay separate."""
+
+    def test_same_named_pdfs_never_mix_corrections_or_exports(
+            self, scenarios, client):
+        data = scenario_data(scenarios, "K")
+        a_key = data["aView"]["activeDocKey"]
+        b_key = data["bView"]["activeDocKey"]
+        assert a_key.endswith("#0") and b_key.endswith("#0")
+        assert a_key.split("#")[0] != b_key.split("#")[0]
+        assert "invoice.pdf" not in a_key
+        assert "invoice.pdf" not in b_key
+
+        assert data["aView"]["total"] == "100.00"
+        assert data["aView"]["cell"] == "101"
+        assert data["bView"]["total"] == "200.00"
+        assert data["bView"]["cell"] == "202"
+        assert data["bView"]["totalEdited"] is False
+        assert data["bView"]["cellEdited"] is False
+        assert "invoice.pdf page 1" in data["aStatus"]
+        assert "invoice.pdf page 1" in data["bStatus"]
+        assert "Showing invoice.pdf" in data["doneStatus"]
+
+        assert data["corrections"] == {
+            a_key: {"invoice.total": "150.00",
+                    "tables[0].cells[0][0]": "Apple"},
+            b_key: {"invoice.total": "250.00",
+                    "tables[0].cells[0][0]": "Banana"},
+        }
+
+        files = data["payload"]["data"]["files"]
+        assert [item["filename"] for item in files] == [
+            "invoice.json", "invoice.json"]
+        page_a = files[0]["data"]["pages"][0]
+        page_b = files[1]["data"]["pages"][0]
+        assert page_a["invoice"]["invoice"]["supplier"] == "SHOP-A"
+        assert page_a["invoice"]["invoice"]["total"] == "100.00"
+        assert page_a["ocr"]["full_text"] == "A TOTAL 100.00"
+        assert page_a["tables"]["tables"][0]["cells"][0]["text"] == "101"
+        assert page_a["user_corrections"] == {
+            "invoice.total": "150.00", "tables[0].cells[0][0]": "Apple"}
+        assert page_b["invoice"]["invoice"]["supplier"] == "SHOP-B"
+        assert page_b["invoice"]["invoice"]["total"] == "200.00"
+        assert page_b["ocr"]["full_text"] == "B TOTAL 200.00"
+        assert page_b["tables"]["tables"][0]["cells"][0]["text"] == "202"
+        assert page_b["user_corrections"] == {
+            "invoice.total": "250.00", "tables[0].cells[0][0]": "Banana"}
+
+        entries = zip_json_entries(export(client, data["payload"]))
+        assert sorted(entries) == ["invoice.json", "invoice_2.json"]
+        archived_a = entries["invoice.json"]["pages"][0]
+        archived_b = entries["invoice_2.json"]["pages"][0]
+        assert archived_a["invoice"]["invoice"]["supplier"] == "SHOP-A"
+        assert archived_b["invoice"]["invoice"]["supplier"] == "SHOP-B"
+        assert archived_a["user_corrections"]["invoice.total"] == "150.00"
+        assert archived_b["user_corrections"]["invoice.total"] == "250.00"
+
+
+class TestSpecialCharacterFilenames:
+    def test_same_named_images_with_hash_stay_separate(self, scenarios,
+                                                       client):
+        data = scenario_data(scenarios, "N")
+        keys = sorted(data["corrections"])
+        assert len(keys) == 2
+        assert all(key.endswith("#0") for key in keys)
+        assert keys[0].split("#")[0] != keys[1].split("#")[0]
+        assert data["bView"]["total"] == "20.00"
+        assert data["bView"]["cell"] == "20"
+        assert data["bView"]["totalEdited"] is False
+        assert data["bView"]["cellEdited"] is False
+        assert data["corrections"][keys[0]] == {"invoice.total": "111.00"}
+        assert data["corrections"][keys[1]] == {
+            "invoice.total": "222.00",
+            "tables[0].cells[0][0]": "Twenty",
+        }
+
+        entries = zip_json_entries(export(client, data["payload"]))
+        assert sorted(entries) == ["scan_2024.json", "scan_2024_2.json"]
+        archived_a = entries["scan_2024.json"]
+        archived_b = entries["scan_2024_2.json"]
+        assert archived_a["workflow"] == "auto"
+        assert archived_a["ocr"]["full_text"] == "A TOTAL 10.00"
+        assert archived_a["invoice"]["invoice"]["total"] == "10.00"
+        assert archived_a["user_corrections"] == {"invoice.total": "111.00"}
+        assert archived_b["ocr"]["full_text"] == "B TOTAL 20.00"
+        assert archived_b["tables"]["tables"][0]["cells"][0]["text"] == "20"
+        assert archived_b["user_corrections"] == {
+            "invoice.total": "222.00",
+            "tables[0].cells[0][0]": "Twenty",
+        }
+
+
+class TestReprocessingCorrectionLifecycle:
+    def test_new_run_drops_previous_run_corrections(self, scenarios, client):
+        data = scenario_data(scenarios, "L")
+        assert data["before"]["total"] == "100.00"
+        assert data["before"]["cell"] == "Apple"
+        assert data["before"]["corrections"]
+
+        after = data["after"]
+        assert after["machineTotal"] == "250.00"
+        assert after["total"] == "250.00"
+        assert after["cell"] == "250"
+        assert after["totalEdited"] is False
+        assert after["cellEdited"] is False
+        assert after["corrections"] == {}
+        assert after["invoicePayload"]["data"]["user_corrections"] == {}
+        assert after["tablePayload"]["data"]["user_corrections"] == {}
+
+        invoice_export = export(client, after["invoicePayload"])
+        invoice_body = json.loads(invoice_export.content)
+        assert invoice_body["machine_output"]["invoice"]["total"] == "250.00"
+        assert invoice_body["user_corrections"] == {}
+        assert "100.00" not in invoice_export.text
+
+        table_export = export(client, after["tablePayload"])
+        table_body = json.loads(table_export.content)
+        assert table_body["machine_output"]["tables"][0]["cells"][0]["text"] == "250"
+        assert table_body["user_corrections"] == {}
+
+    def test_second_batch_run_replaces_all_corrections(self, scenarios,
+                                                       client):
+        data = scenario_data(scenarios, "O")
+        assert data["firstRun"]["corrections"]
+        second = data["secondRun"]
+        assert second["corrections"] == {}
+        assert second["total"] == "40.00"
+        assert second["cell"] == "40"
+        assert second["totalEdited"] is False
+        assert second["cellEdited"] is False
+
+        files = second["batch"]["data"]["files"]
+        assert [item["filename"] for item in files] == [
+            "batch-a.json", "batch-b.json"]
+        pdf = files[0]["data"]
+        assert pdf["pages"][0]["invoice"]["invoice"]["total"] == "30.00"
+        assert pdf["pages"][0]["user_corrections"] == {}
+        image = files[1]["data"]
+        assert image["workflow"] == "auto"
+        assert image["invoice"]["invoice"]["total"] == "40.00"
+        assert image["user_corrections"] == {}
+        assert "999.00" not in json.dumps(second["batch"])
+
+        entries = zip_json_entries(export(client, second["batch"]))
+        assert set(entries) == {"batch-a.json", "batch-b.json"}
+        assert entries["batch-a.json"]["pages"][0]["user_corrections"] == {}
+        assert entries["batch-b.json"]["user_corrections"] == {}
+
+
+class TestImageAutoBatch:
+    def test_auto_image_batch_keeps_all_artifacts_and_corrections(
+            self, scenarios, client):
+        data = scenario_data(scenarios, "M")
+        files = data["payload"]["data"]["files"]
+        assert len(files) == 1
+        entry = files[0]
+        assert entry["kind"] == "ocr-json"
+        assert entry["filename"] == "scan.json"
+        payload = entry["data"]
+        assert payload["workflow"] == "auto"
+        assert payload["ocr"]["full_text"] == "AUTO TOTAL 9.57"
+        assert payload["invoice"]["invoice"]["total"] == "9.57"
+        assert payload["tables"]["tables"][0]["cells"][0]["text"] == "9.57"
+        assert payload["user_corrections"] == {
+            "invoice.total": "9.99",
+            "tables[0].cells[0][0]": "Edited",
+        }
+
+        entries = zip_json_entries(export(client, data["payload"]))
+        assert entries == {"scan.json": payload}
+
+
+class TestImageWorkflowBatchShapes:
+    def test_single_workflow_entries_keep_corrections_separate(
+            self, scenarios, client):
+        data = scenario_data(scenarios, "P")
+        files = {item["filename"]: item
+                 for item in data["payload"]["data"]["files"]}
+        assert set(files) == {"bill.json", "grid.json", "text.json"}
+
+        bill = files["bill.json"]["data"]
+        assert bill["machine_output"]["invoice"]["supplier"] == "SHOP-I"
+        assert bill["machine_output"]["invoice"]["total"] == "10.00"
+        assert bill["user_corrections"] == {"invoice.total": "77.00"}
+
+        grid = files["grid.json"]["data"]
+        assert grid["machine_output"]["tables"][0]["cells"][0]["text"] == "20"
+        assert grid["user_corrections"] == {
+            "tables[0].cells[0][0]": "Edited"}
+
+        text = files["text.json"]["data"]
+        assert text["full_text"] == "O TOTAL 30.00"
+        assert "machine_output" not in text
+
+        entries = zip_json_entries(export(client, data["payload"]))
+        assert set(entries) == {"bill.json", "grid.json", "text.json"}
+        assert entries["bill.json"]["user_corrections"] == {
+            "invoice.total": "77.00"}
+        assert entries["grid.json"]["user_corrections"] == {
+            "tables[0].cells[0][0]": "Edited"}
+
+
+class TestBatchEntryLimit:
+    def test_ten_successes_produce_ten_readable_entries(self, scenarios,
+                                                        client):
+        data = scenario_data(scenarios, "Q")
+        assert len(data["tenSuccess"]["data"]["files"]) == 10
+        entries = zip_json_entries(export(client, data["tenSuccess"]))
+        assert len(entries) == 10
+        for index in range(1, 11):
+            archived = entries[f"doc{index}.json"]
+            assert archived["machine_output"]["invoice"]["total"] == \
+                f"{index}.00"
+
+    def test_nine_successes_plus_failure_report_fit_the_limit(
+            self, scenarios, client):
+        data = scenario_data(scenarios, "Q")
+        files = data["ninePlusOne"]["data"]["files"]
+        assert len(files) == 10
+        assert files[-1]["filename"] == "batch-errors.json"
+        entries = zip_json_entries(export(client, data["ninePlusOne"]))
+        assert len(entries) == 10
+        assert "doc10.json" not in entries
+        assert entries["doc9.json"]["machine_output"]["invoice"]["total"] == \
+            "9.00"
+        assert entries["batch-errors.json"] == {
+            "failed_documents": [{"filename": "bad.png", "error": "boom"}]}
+
+    def test_all_failed_documents_stay_explicit(self, scenarios, client):
+        data = scenario_data(scenarios, "Q")
+        files = data["allFailed"]["data"]["files"]
+        assert len(files) == 1
+        assert files[0]["filename"] == "batch-errors.json"
+        entries = zip_json_entries(export(client, data["allFailed"]))
+        assert len(entries) == 1
+        failed = entries["batch-errors.json"]["failed_documents"]
+        assert len(failed) == 10
+        assert {item["error"] for item in failed} == {
+            f"fail {index}" for index in range(10)}
+
+
+class TestCancellation:
+    def test_stop_exports_only_completed_documents(self, scenarios, client):
+        data = scenario_data(scenarios, "R")
+        assert data["calls"] == 1
+        assert data["stopStatus"] == "Stopped after 1 of 2 document(s)."
+        assert len(data["corrections"]) == 1
+        files = data["payload"]["data"]["files"]
+        assert len(files) == 1
+        assert files[0]["filename"] == "first.json"
+        page = files[0]["data"]["pages"][0]
+        assert page["invoice"]["invoice"]["supplier"] == "SHOP-A"
+        assert page["user_corrections"] == {"invoice.total": "15.00"}
+
+        entries = zip_json_entries(export(client, data["payload"]))
+        assert list(entries) == ["first.json"]
+        assert "second" not in json.dumps(entries)
+
+
+class TestSelectionCorrectionLifecycle:
+    def test_selecting_new_documents_drops_previous_corrections(self,
+                                                                scenarios):
+        data = scenario_data(scenarios, "S")
+        assert data["beforeSelection"] == {
+            "corrections": {"doc1#0": {"invoice.total": "111.00"}},
+            "marker": True,
+        }
+        assert data["oldDocCorrections"] == {}
+        after = data["afterSelection"]
+        assert after["corrections"] == {}
+        assert after["machine"] is None
+        assert after["resultsHidden"] is True
+        assert after["activeDocKey"] == after["newDocKey"]
+        assert after["activeDocKey"].endswith("#0")
+        assert "report.png" not in after["activeDocKey"]
+        assert after["payload"] == {
+            "ok": False,
+            "message": "No successful result is selected to export.",
+        }
+
+    def test_failed_rerun_shows_and_exports_no_stale_state(self, scenarios):
+        data = scenario_data(scenarios, "T")
+        assert data["beforeRerun"] is True
+        assert data["corrections"] == {}
+        assert data["machine"] is None
+        assert data["resultsHidden"] is True
+        assert data["status"].startswith("Done (0/1 succeeded).")
+        assert data["exportAttempt"] == {
+            "ok": False,
+            "message": "No successful result is selected to export.",
+        }

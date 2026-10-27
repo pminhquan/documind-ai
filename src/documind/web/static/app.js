@@ -8,7 +8,9 @@ const state = {
   naturalWidth: 0,
   naturalHeight: 0,
   machine: null,     // untouched model output for the active document/page
-  activeDocKey: null, // "filename#pageLabel" — corrections never leak across docs/pages
+  docIds: new Map(), // File object -> opaque run-local id (filenames are not unique)
+  docIdSeq: 0,
+  activeDocKey: null, // "docN#page_index" — corrections never leak across docs/pages
   activePageIndex: null, // PDF page_index on screen; null for single-image results
   correctionsByDoc: {}, // { docKey: { fieldPath: value } }
   cancelled: false,
@@ -18,6 +20,28 @@ const MAX_BATCH_FILES = 10;
 const WORKFLOW_EXPORT_KIND = { ocr: "ocr-json", invoice: "invoice-json", table: "table-json" };
 
 const $ = (id) => document.getElementById(id);
+
+function assignDocumentIds(files) {
+  state.docIds = new Map();
+  state.docIdSeq = 0;
+  files.forEach((file) => {
+    state.docIdSeq += 1;
+    state.docIds.set(file, `doc${state.docIdSeq}`);
+  });
+}
+
+function documentId(file) {
+  if (!file) return null;
+  if (!state.docIds.has(file)) {
+    state.docIdSeq += 1;
+    state.docIds.set(file, `doc${state.docIdSeq}`);
+  }
+  return state.docIds.get(file);
+}
+
+function docKeyFor(file, pageIndex) {
+  return `${documentId(file)}#${pageIndex}`;
+}
 
 /* ---------- upload and preview ---------- */
 
@@ -57,10 +81,11 @@ function loadFile(file, allFiles) {
     return;
   }
   state.files = allFiles && allFiles.length > 1 ? allFiles : [file];
+  assignDocumentIds(state.files);
   state.file = file;
   state.machine = null;
   state.correctionsByDoc = {};     // new selection: drop stale edits
-  state.activeDocKey = `${file.name}#0`;
+  state.activeDocKey = docKeyFor(file, 0);
   state.activePageIndex = null;
   state.batchResults = [];
   $("batch-export-btn").classList.add("hidden");
@@ -103,7 +128,14 @@ $("run-btn").addEventListener("click", async () => {
   $("run-btn").disabled = true;
   $("stop-btn").classList.remove("hidden");
   state.cancelled = false;
+  state.correctionsByDoc = {};  // a fresh run invalidates previous-run edits
+  state.activeDocKey = null;
+  state.machine = null;  // nothing to display/export until a file succeeds
+  state.activePageIndex = null;
   state.batchResults = [];  // a new run replaces the previous batch
+  $("results").classList.add("hidden");
+  $("pages-nav").innerHTML = "";
+  $("pages-nav").classList.add("hidden");
   $("batch-export-btn").classList.add("hidden");
   const batchList = $("batch-status");
   batchList.innerHTML = "";
@@ -132,8 +164,9 @@ $("run-btn").addEventListener("click", async () => {
         state.machine = result;
         state.file = file;  // active document drives page keys and export names
         state.activePageIndex = null;
-        state.activeDocKey = `${file.name}#0`;  // fresh machine output
+        state.activeDocKey = docKeyFor(file, 0);  // fresh machine output
         state.batchResults.push({
+          docId: documentId(file),
           filename: file.name,
           workflow,
           kind: exportKindFor(workflow, result),
@@ -143,12 +176,14 @@ $("run-btn").addEventListener("click", async () => {
         renderResults();
       } catch (fileError) {
         entry.textContent = `${file.name}: FAILED - ${fileError.message}`;
-        state.batchResults.push({ filename: file.name, kind: "ocr-json",
+        state.batchResults.push({ docId: documentId(file),
+                                  filename: file.name, kind: "ocr-json",
                                   error: fileError.message });
       }
     }
     const ok = state.batchResults.filter((r) => !r.error).length;
-    setStatus(`Done (${ok}/${state.batchResults.length} succeeded). ` +
+    const shown = ok && state.file ? ` Showing ${state.file.name}.` : "";
+    setStatus(`Done (${ok}/${state.batchResults.length} succeeded).${shown} ` +
               "Machine output shown - edit fields to add corrections.");
   } finally {
     $("run-btn").disabled = false;
@@ -209,9 +244,28 @@ function exportDataFor(workflow, result, correctionsByPage = {}) {
       }),
     };
   }
+  const corrections = correctionsByPage["0"] || {};
   if (workflow === "ocr") return result.ocr || {};
-  if (workflow === "invoice") return { machine_output: result.invoice || null };
-  return { machine_output: result.tables || null };
+  if (workflow === "invoice") {
+    return {
+      machine_output: result.invoice || null,
+      user_corrections: corrections,
+    };
+  }
+  if (workflow === "table") {
+    return {
+      machine_output: result.tables || null,
+      user_corrections: corrections,
+    };
+  }
+  // Auto (unified) results: keep every generated artifact, never just tables.
+  return {
+    workflow: "auto",
+    ocr: result.ocr || null,
+    invoice: result.invoice || null,
+    tables: result.tables || null,
+    user_corrections: corrections,
+  };
 }
 
 function renderPdf(data) {
@@ -236,7 +290,7 @@ function renderPdf(data) {
     nav.appendChild(tab);
   });
   if (!successfulPages.length) {
-    state.activeDocKey = `${state.file ? state.file.name : "document"}#0`;
+    state.activeDocKey = docKeyFor(state.file, 0);
     $("results").classList.remove("hidden");
     $("ocr-panel").classList.add("hidden");
     $("invoice-panel").classList.add("hidden");
@@ -255,7 +309,7 @@ function selectPage(pageIndex) {
     setStatus(`Page ${pageIndex + 1} is not available.`, true);
     return;
   }
-  state.activeDocKey = `${state.file ? state.file.name : "document"}#${page.page_index}`;
+  state.activeDocKey = docKeyFor(state.file, page.page_index);
   $("pages-nav").querySelectorAll(".tab").forEach((tab) => {
     tab.setAttribute("aria-selected",
       tab.dataset.pageIndex === String(page.page_index) ? "true" : "false");
@@ -431,7 +485,7 @@ function updateCorrectionCount() {
   const count = Object.keys(activeCorrections()).length;
   const status = $("status");
   if (status && count && !status.classList.contains("error")) {
-    status.textContent = `${count} unsaved correction(s) on ${state.activeDocKey}`;
+    status.textContent = `${count} unsaved correction(s) on ${describeActive()}`;
   }
 }
 
@@ -478,8 +532,9 @@ function resetCorrectionPrefix(prefix) {
 }
 
 function describeActive() {
+  const name = (state.file && state.file.name) || "this document";
   const pageNumber = activePageNumber();
-  return pageNumber === null ? "this document" : `page ${pageNumber}`;
+  return pageNumber === null ? name : `${name} page ${pageNumber}`;
 }
 
 $("invoice-reset").addEventListener("click", () => {
@@ -682,8 +737,8 @@ function buildExportPayload(kind) {
   };
 }
 
-function correctionsForFile(filename) {
-  const prefix = `${filename}#`;
+function correctionsForDocument(docId) {
+  const prefix = `${docId}#`;
   const byPage = {};
   Object.entries(state.correctionsByDoc).forEach(([docKey, corrections]) => {
     if (docKey.startsWith(prefix)) {
@@ -704,7 +759,7 @@ function buildBatchPayload() {
       kind: result.kind,
       filename: `${stem}.${extension}`,
       data: exportDataFor(
-        result.workflow, result.result, correctionsForFile(result.filename)),
+        result.workflow, result.result, correctionsForDocument(result.docId)),
     };
   });
   // Failures stay explicit; they never become fake OCR/invoice/table data.

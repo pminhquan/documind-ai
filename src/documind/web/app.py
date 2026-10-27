@@ -452,12 +452,22 @@ def _build_export(kind: str, data: dict) -> tuple[bytes, str, str]:
                         detail=f"files[{index}] needs a valid 'kind' and 'data'",
                     )
                 content, _, default_name = _build_export(item["kind"], item["data"])
-                base_name = str(item.get("filename") or default_name)
-                name = SAFE_FILENAME_RE.sub("_", base_name)[:80] or f"file_{index}"
-                stem, dot, _extension = name.rpartition(".")
+                base_name = SAFE_FILENAME_RE.sub(
+                    "_", str(item.get("filename") or default_name))
+                # Budget the 80-char cap on the stem so truncation and
+                # dedupe suffixes never eat the extension.
+                stem, dot, extension = base_name.rpartition(".")
+                if dot:
+                    extension = extension[:16]
+                    stem = stem[:max(1, 76 - len(extension))]
+                    name = f"{stem}{dot}{extension}"
+                else:
+                    name = base_name[:80]
+                name = name or f"file_{index}"
                 unique, counter = name, 2
                 while unique in used_names:
-                    unique = f"{stem}_{counter}{dot}" if dot else f"{name}_{counter}"
+                    unique = (f"{stem}_{counter}{dot}{extension}"
+                              if dot else f"{name}_{counter}")
                     counter += 1
                 used_names.add(unique)
                 archive.writestr(unique, content)

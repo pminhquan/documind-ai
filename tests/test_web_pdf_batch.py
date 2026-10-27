@@ -226,7 +226,27 @@ class TestBatchZipExport:
         response = client.post("/api/export", json={"kind": "batch-zip",
                                                     "data": payload})
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-            assert len(archive.namelist()) == 2
+            assert sorted(archive.namelist()) == ["same.txt", "same_2.txt"]
+            assert archive.read("same.txt") == b"one"
+            assert archive.read("same_2.txt") == b"two"
+
+    def test_long_duplicate_names_keep_extension(self, client):
+        filename = f"{'x' * 78}.txt"
+        payload = {"files": [
+            {"kind": "ocr-txt", "filename": filename,
+             "data": {"full_text": "one"}},
+            {"kind": "ocr-txt", "filename": filename,
+             "data": {"full_text": "two"}},
+        ]}
+        response = client.post("/api/export", json={"kind": "batch-zip",
+                                                    "data": payload})
+        assert response.status_code == 200
+        stem = "x" * 73  # 80-char cap leaves room for the extension
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert sorted(archive.namelist()) == [f"{stem}.txt",
+                                                  f"{stem}_2.txt"]
+            assert archive.read(f"{stem}.txt") == b"one"
+            assert archive.read(f"{stem}_2.txt") == b"two"
 
     def test_too_many_files_422(self, client):
         payload = {"files": [

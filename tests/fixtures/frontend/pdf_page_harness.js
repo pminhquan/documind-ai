@@ -104,11 +104,11 @@ class FakeElement {
     if (index >= 0) list.splice(index, 1);
   }
   dispatch(type, event = {}) {
-    (this.handlers[type] || []).forEach((handler) =>
+    return (this.handlers[type] || []).map((handler) =>
       handler(Object.assign({ target: this, preventDefault() {} }, event)));
   }
   click() {
-    this.dispatch("click");
+    return this.dispatch("click");
   }
   focus() {
     this.dispatch("focus");
@@ -230,10 +230,15 @@ class FakeDocument {
 const document = new FakeDocument();
 const window = { addEventListener() {}, location: { href: "" } };
 const URLStub = { createObjectURL: () => "blob:stub", revokeObjectURL() {} };
-const fetchStub = () => Promise.resolve({
-  ok: true, json: async () => ({}), blob: async () => ({}),
-  headers: { get: () => null },
-});
+const fetchState = { queue: [], calls: 0 };
+const fetchStub = (url, options) => {
+  fetchState.calls += 1;
+  const responder = fetchState.queue.shift();
+  if (!responder) {
+    return Promise.reject(new Error("unexpected fetch call"));
+  }
+  return Promise.resolve().then(() => responder(url, options));
+};
 class FormDataStub {
   append() {}
 }
@@ -266,6 +271,10 @@ const source = fs.readFileSync(appPath, "utf8") + `
     typeof buildBatchPayload === "function" ? buildBatchPayload : null,
   resolveActiveResult:
     typeof resolveActiveResult === "function" ? resolveActiveResult : null,
+  docKeyFor: typeof docKeyFor === "function" ? docKeyFor : null,
+  documentId: typeof documentId === "function" ? documentId : null,
+  correctionsForDocument:
+    typeof correctionsForDocument === "function" ? correctionsForDocument : null,
 };
 `;
 vm.runInContext(source, context, { filename: "app.js" });
@@ -366,18 +375,42 @@ function imageFixture() {
   };
 }
 
+function singlePagePdf(label, supplier, total, cellText) {
+  return {
+    kind: "pdf",
+    page_count: 1,
+    workflows: ["ocr", "invoice", "table"],
+    errors: [],
+    pages: [pdfPage(0, label, supplier, total, cellText)],
+  };
+}
+
+function imageResult(label, supplier, total, cellText) {
+  return {
+    workflows: ["ocr", "invoice", "table"],
+    source: "upload",
+    ocr: ocrResponse(label, total),
+    invoice: invoiceResponse(supplier, total, label),
+    tables: tableResponse("table_0", cellText),
+  };
+}
+
 /* ---------- harness helpers ---------- */
 
 function resetState(machine, filename) {
   state.machine = machine;
   state.file = { name: filename, size: 1024 };
   state.files = [state.file];
+  state.docIds = new Map();
+  state.docIdSeq = 0;
   state.correctionsByDoc = {};
   state.activeDocKey = null;
   state.activePageIndex = null;
   state.batchResults = [];
   state.naturalWidth = 0;
   state.naturalHeight = 0;
+  fetchState.queue.length = 0;
+  fetchState.calls = 0;
 
   const invoiceTable = document.getElementById("invoice-fields");
   if (!invoiceTable.querySelector("tbody")) {
@@ -456,19 +489,88 @@ function collectPageExports(kind) {
   return payloads;
 }
 
+/* ---------- real-handler helpers (file input, Run, Stop) ---------- */
+
+function jsonResponse(body, ok = true, status = ok ? 200 : 500) {
+  return {
+    ok,
+    status,
+    json: async () => body,
+    blob: async () => new BlobStub(),
+    headers: { get: () => null },
+  };
+}
+
+function queueFetch(responder) {
+  fetchState.queue.push(responder);
+}
+
+function chooseFiles(files) {
+  const input = document.getElementById("file-input");
+  input.files = files;
+  input.dispatch("change");
+}
+
+function chooseWorkflow(workflow) {
+  document.getElementById("workflow").value = workflow;
+}
+
+function runButtonClick() {
+  return Promise.all(document.getElementById("run-btn").click());
+}
+
+function stopButtonClick() {
+  return Promise.all(document.getElementById("stop-btn").click());
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+function waitFor(condition, label) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const tick = () => {
+      attempts += 1;
+      let ready = false;
+      try {
+        ready = condition();
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      if (ready) {
+        resolve();
+        return;
+      }
+      if (attempts > 200) {
+        reject(new Error(`timed out waiting for ${label || "condition"}`));
+        return;
+      }
+      setTimeout(tick, 0);
+    };
+    tick();
+  });
+}
+
 /* ---------- scenarios ---------- */
 
 const scenarios = {};
+let scenarioChain = Promise.resolve();
 
 function scenario(name, fn) {
-  try {
-    scenarios[name] = { ok: true, data: fn() };
-  } catch (error) {
-    scenarios[name] = {
-      ok: false,
-      error: String(error && error.stack ? error.stack : error),
-    };
-  }
+  scenarioChain = scenarioChain.then(async () => {
+    try {
+      scenarios[name] = { ok: true, data: await fn() };
+    } catch (error) {
+      scenarios[name] = {
+        ok: false,
+        error: String(error && error.stack ? error.stack : error),
+      };
+    }
+  });
 }
 
 scenario("A", () => {
@@ -512,6 +614,8 @@ scenario("A", () => {
   };
 
   return { initial, page1, page0Again, page1Again,
+           pageKeys: [app.docKeyFor(state.file, 0),
+                      app.docKeyFor(state.file, 1)],
            corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)) };
 });
 
@@ -538,14 +642,14 @@ scenario("C", () => {
     totalEdited: markerFor("invoice-total"),
     cell: cellValue("table_0 cell 0,0"),
     cellEdited: cellMarker("table_0 cell 0,0"),
-    corrections: correctionsFor("document.pdf#0"),
+    corrections: correctionsFor(app.docKeyFor(state.file, 0)),
   };
 
   pageTabs()[1].click();
   const page1AfterPage0Reset = {
     total: inputValue("invoice-total"),
     cell: cellValue("table_0 cell 0,0"),
-    corrections: correctionsFor("document.pdf#1"),
+    corrections: correctionsFor(app.docKeyFor(state.file, 1)),
   };
 
   document.getElementById("tables-reset").click();
@@ -554,7 +658,7 @@ scenario("C", () => {
     totalEdited: markerFor("invoice-total"),
     cell: cellValue("table_0 cell 0,0"),
     cellEdited: cellMarker("table_0 cell 0,0"),
-    corrections: correctionsFor("document.pdf#1"),
+    corrections: correctionsFor(app.docKeyFor(state.file, 1)),
     invoicePayload: app.buildExportPayload("invoice-csv"),
     tablePayload: app.buildExportPayload("table-csv"),
   };
@@ -563,7 +667,7 @@ scenario("C", () => {
   const page0Final = {
     total: inputValue("invoice-total"),
     cell: cellValue("table_0 cell 0,0"),
-    corrections: correctionsFor("document.pdf#0"),
+    corrections: correctionsFor(app.docKeyFor(state.file, 0)),
   };
 
   return { page0AfterInvoiceReset, page1AfterPage0Reset,
@@ -592,6 +696,7 @@ scenario("D", () => {
   let batch = null;
   if (app.buildBatchPayload) {
     state.batchResults = [{
+      docId: app.documentId(state.file),
       filename: "document.pdf",
       workflow: "auto",
       kind: "ocr-json",
@@ -611,7 +716,7 @@ scenario("D", () => {
 
 scenario("E", () => {
   resetState(imageFixture(), "scan.png");
-  state.activeDocKey = "scan.png#0";
+  state.activeDocKey = app.docKeyFor(state.file, 0);
   app.renderResults();
   const initial = {
     total: inputValue("invoice-total"),
@@ -621,8 +726,13 @@ scenario("E", () => {
   };
   setInput(document.findInputById("invoice-total"), "10.00");
   setInput(document.findInputByLabel("table_0 cell 0,0"), "Apple");
+  const afterEdits = {
+    status: document.getElementById("status").textContent,
+    ...activeInfo(),
+  };
   return {
     initial,
+    afterEdits,
     invoiceCsv: app.buildExportPayload("invoice-csv"),
     invoiceJson: app.buildExportPayload("invoice-json"),
     tableCsv: app.buildExportPayload("table-csv"),
@@ -633,26 +743,31 @@ scenario("E", () => {
 scenario("F", () => {
   const machine = pdfFixture();
   resetState(machine, "document.pdf");
+  const page0Key = app.docKeyFor(state.file, 0);
+  const page1Key = app.docKeyFor(state.file, 1);
   state.correctionsByDoc = {
-    "document.pdf#0": {
+    [page0Key]: {
       "invoice.total": "100.00",
       "tables[0].cells[0][0]": "Apple",
     },
-    "document.pdf#1": {
+    [page1Key]: {
       "invoice.total": "200.00",
       "tables[0].cells[0][0]": "Orange",
     },
   };
   state.batchResults = [
-    { filename: "document.pdf", workflow: "auto", kind: "ocr-json",
-      result: machine },
-    { filename: "scan.png", workflow: "invoice", kind: "invoice-json",
+    { docId: app.documentId(state.file), filename: "document.pdf",
+      workflow: "auto", kind: "ocr-json", result: machine },
+    { docId: app.documentId({ name: "scan.png", size: 1 }),
+      filename: "scan.png", workflow: "invoice", kind: "invoice-json",
       result: imageFixture() },
-    { filename: "broken.png", workflow: "ocr", kind: "ocr-json",
+    { docId: app.documentId({ name: "broken.png", size: 1 }),
+      filename: "broken.png", workflow: "ocr", kind: "ocr-json",
       error: "boom" },
   ];
   if (!app.buildBatchPayload) return { available: false };
-  return { available: true, payload: app.buildBatchPayload() };
+  return { available: true, payload: app.buildBatchPayload(),
+           pageKeys: [page0Key, page1Key] };
 });
 
 scenario("G", () => {
@@ -661,7 +776,7 @@ scenario("G", () => {
   machine.pages[0].tables.tables[0].cells[0].text = "=cmd()";
   resetState(machine, "document.pdf");
   state.correctionsByDoc = {
-    "document.pdf#0": { "tables[0].cells[0][0]": "=cmd()" },
+    [app.docKeyFor(state.file, 0)]: { "tables[0].cells[0][0]": "=cmd()" },
   };
   app.renderResults();
   return {
@@ -725,4 +840,315 @@ scenario("I", () => {
   return { tableCsv: app.buildExportPayload("table-csv") };
 });
 
-process.stdout.write(JSON.stringify({ scenarios }));
+scenario("M", () => {
+  const machine = imageResult("AUTO", "SHOP-A", "9.57", "9.57");
+  resetState(machine, "scan.png");
+  state.activeDocKey = app.docKeyFor(state.file, 0);
+  app.renderResults();
+  setInput(document.findInputById("invoice-total"), "9.99");
+  setInput(document.findInputByLabel("table_0 cell 0,0"), "Edited");
+  state.batchResults = [{
+    docId: app.documentId(state.file),
+    filename: "scan.png",
+    workflow: "auto",
+    kind: "ocr-json",
+    result: machine,
+  }];
+  return { payload: app.buildBatchPayload(), active: activeInfo() };
+});
+
+scenario("K", async () => {
+  resetState(null, "placeholder.pdf");
+  const fileA = { name: "invoice.pdf", size: 111, lastModified: 1 };
+  const fileB = { name: "invoice.pdf", size: 222, lastModified: 2 };
+  chooseFiles([fileA, fileB]);
+  chooseWorkflow("auto");
+  const docA = singlePagePdf("A", "SHOP-A", "100.00", "101");
+  const docB = singlePagePdf("B", "SHOP-B", "200.00", "202");
+  const bResponse = deferred();
+  queueFetch(() => jsonResponse(docA));
+  queueFetch(() => bResponse.promise);
+  const run = runButtonClick();
+  await waitFor(() => fetchState.calls === 2, "second document fetch");
+
+  const aView = {
+    total: inputValue("invoice-total"),
+    cell: cellValue("table_0 cell 0,0"),
+    ...activeInfo(),
+  };
+  setInput(document.findInputById("invoice-total"), "150.00");
+  setInput(document.findInputByLabel("table_0 cell 0,0"), "Apple");
+  const aStatus = document.getElementById("status").textContent;
+
+  bResponse.resolve(jsonResponse(docB));
+  await run;
+  const doneStatus = document.getElementById("status").textContent;
+  const bView = {
+    total: inputValue("invoice-total"),
+    cell: cellValue("table_0 cell 0,0"),
+    totalEdited: markerFor("invoice-total"),
+    cellEdited: cellMarker("table_0 cell 0,0"),
+    ...activeInfo(),
+  };
+  setInput(document.findInputById("invoice-total"), "250.00");
+  setInput(document.findInputByLabel("table_0 cell 0,0"), "Banana");
+  const bStatus = document.getElementById("status").textContent;
+
+  return {
+    aView,
+    aStatus,
+    bView,
+    bStatus,
+    doneStatus,
+    payload: app.buildBatchPayload(),
+    corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+  };
+});
+
+scenario("L", async () => {
+  resetState(null, "scan.png");
+  const file = { name: "scan.png", size: 100, lastModified: 1 };
+  chooseFiles([file]);
+  chooseWorkflow("auto");
+  const first = imageResult("FIRST", "SHOP-1", "10.00", "10");
+  queueFetch(() => jsonResponse(first));
+  await runButtonClick();
+  setInput(document.findInputById("invoice-total"), "100.00");
+  setInput(document.findInputByLabel("table_0 cell 0,0"), "Apple");
+  const before = {
+    total: inputValue("invoice-total"),
+    cell: cellValue("table_0 cell 0,0"),
+    corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+  };
+
+  const second = imageResult("SECOND", "SHOP-2", "250.00", "250");
+  queueFetch(() => jsonResponse(second));
+  await runButtonClick();
+  return {
+    before,
+    after: {
+      total: inputValue("invoice-total"),
+      cell: cellValue("table_0 cell 0,0"),
+      totalEdited: markerFor("invoice-total"),
+      cellEdited: cellMarker("table_0 cell 0,0"),
+      machineTotal: state.machine.invoice.invoice.total,
+      corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+      invoicePayload: app.buildExportPayload("invoice-json"),
+      tablePayload: app.buildExportPayload("table-json"),
+    },
+  };
+});
+
+scenario("N", async () => {
+  resetState(null, "placeholder.png");
+  const fileA = { name: "scan#2024.png", size: 10, lastModified: 1 };
+  const fileB = { name: "scan#2024.png", size: 20, lastModified: 2 };
+  chooseFiles([fileA, fileB]);
+  chooseWorkflow("auto");
+  const imgA = imageResult("A", "SHOP-A", "10.00", "10");
+  const imgB = imageResult("B", "SHOP-B", "20.00", "20");
+  const bResponse = deferred();
+  queueFetch(() => jsonResponse(imgA));
+  queueFetch(() => bResponse.promise);
+  const run = runButtonClick();
+  await waitFor(() => fetchState.calls === 2, "second image fetch");
+  setInput(document.findInputById("invoice-total"), "111.00");
+  bResponse.resolve(jsonResponse(imgB));
+  await run;
+  const bView = {
+    total: inputValue("invoice-total"),
+    cell: cellValue("table_0 cell 0,0"),
+    totalEdited: markerFor("invoice-total"),
+    cellEdited: cellMarker("table_0 cell 0,0"),
+  };
+  setInput(document.findInputById("invoice-total"), "222.00");
+  setInput(document.findInputByLabel("table_0 cell 0,0"), "Twenty");
+  return {
+    bView,
+    payload: app.buildBatchPayload(),
+    corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+  };
+});
+
+scenario("O", async () => {
+  resetState(null, "placeholder.pdf");
+  const pdfFile = { name: "batch-a.pdf", size: 1, lastModified: 1 };
+  const imageFile = { name: "batch-b.png", size: 2, lastModified: 2 };
+  chooseFiles([pdfFile, imageFile]);
+  chooseWorkflow("auto");
+  queueFetch(() => jsonResponse(singlePagePdf("A", "SHOP-A", "10.00", "10")));
+  queueFetch(() => jsonResponse(imageResult("B", "SHOP-B", "20.00", "20")));
+  await runButtonClick();
+  setInput(document.findInputById("invoice-total"), "999.00");
+  setInput(document.findInputByLabel("table_0 cell 0,0"), "Edited");
+  const firstRun = {
+    corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+    batch: app.buildBatchPayload(),
+  };
+
+  queueFetch(() => jsonResponse(singlePagePdf("A2", "SHOP-A", "30.00", "30")));
+  queueFetch(() => jsonResponse(imageResult("B2", "SHOP-B", "40.00", "40")));
+  await runButtonClick();
+  return {
+    firstRun,
+    secondRun: {
+      total: inputValue("invoice-total"),
+      cell: cellValue("table_0 cell 0,0"),
+      totalEdited: markerFor("invoice-total"),
+      cellEdited: cellMarker("table_0 cell 0,0"),
+      corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+      batch: app.buildBatchPayload(),
+    },
+  };
+});
+
+scenario("P", () => {
+  resetState(null, "placeholder.png");
+  const invoiceFile = { name: "bill.png", size: 1, lastModified: 1 };
+  const tableFile = { name: "grid.png", size: 2, lastModified: 2 };
+  const ocrFile = { name: "text.png", size: 3, lastModified: 3 };
+  state.files = [invoiceFile, tableFile, ocrFile];
+  state.file = invoiceFile;
+  state.correctionsByDoc = {
+    [app.docKeyFor(invoiceFile, 0)]: { "invoice.total": "77.00" },
+    [app.docKeyFor(tableFile, 0)]: { "tables[0].cells[0][0]": "Edited" },
+  };
+  state.batchResults = [
+    { docId: app.documentId(invoiceFile), filename: "bill.png",
+      workflow: "invoice", kind: "invoice-json",
+      result: imageResult("I", "SHOP-I", "10.00", "10") },
+    { docId: app.documentId(tableFile), filename: "grid.png",
+      workflow: "table", kind: "table-json",
+      result: imageResult("T", "SHOP-T", "20.00", "20") },
+    { docId: app.documentId(ocrFile), filename: "text.png",
+      workflow: "ocr", kind: "ocr-json",
+      result: imageResult("O", "SHOP-O", "30.00", "30") },
+  ];
+  return { payload: app.buildBatchPayload() };
+});
+
+scenario("Q", () => {
+  resetState(null, "placeholder.png");
+  const files = Array.from({ length: 10 }, (_, index) => ({
+    name: `doc${index + 1}.png`, size: index + 1, lastModified: index + 1,
+  }));
+  state.files = files;
+  state.batchResults = files.map((file, index) => ({
+    docId: app.documentId(file),
+    filename: file.name,
+    workflow: "invoice",
+    kind: "invoice-json",
+    result: imageResult(`D${index}`, `SHOP-${index}`, `${index + 1}.00`,
+                        `${index + 1}`),
+  }));
+  const tenSuccess = app.buildBatchPayload();
+  state.batchResults = state.batchResults.slice(0, 9).concat([{
+    docId: app.documentId({ name: "bad.png", size: 99 }),
+    filename: "bad.png",
+    kind: "ocr-json",
+    error: "boom",
+  }]);
+  const ninePlusOne = app.buildBatchPayload();
+  state.batchResults = files.map((file, index) => ({
+    docId: app.documentId(file),
+    filename: file.name,
+    kind: "ocr-json",
+    error: `fail ${index}`,
+  }));
+  return { tenSuccess, ninePlusOne, allFailed: app.buildBatchPayload() };
+});
+
+scenario("R", async () => {
+  resetState(null, "placeholder.pdf");
+  const firstFile = { name: "first.pdf", size: 1, lastModified: 1 };
+  const secondFile = { name: "second.pdf", size: 2, lastModified: 2 };
+  chooseFiles([firstFile, secondFile]);
+  chooseWorkflow("auto");
+  const firstResponse = deferred();
+  queueFetch(() => firstResponse.promise);
+  queueFetch(() => jsonResponse(singlePagePdf("B", "SHOP-B", "20.00", "20")));
+  const run = runButtonClick();
+  await waitFor(() => fetchState.calls === 1, "first fetch");
+  await stopButtonClick();
+  firstResponse.resolve(jsonResponse(singlePagePdf("A", "SHOP-A", "10.00", "10")));
+  await run;
+  const stopStatus = document.getElementById("status").textContent;
+  setInput(document.findInputById("invoice-total"), "15.00");
+  return {
+    calls: fetchState.calls,
+    stopStatus,
+    payload: app.buildBatchPayload(),
+    corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+  };
+});
+
+scenario("S", async () => {
+  resetState(null, "placeholder.png");
+  const firstFile = { name: "report.png", size: 1, lastModified: 1 };
+  chooseFiles([firstFile]);
+  chooseWorkflow("auto");
+  queueFetch(() => jsonResponse(imageResult("A", "SHOP-A", "10.00", "10")));
+  await runButtonClick();
+  setInput(document.findInputById("invoice-total"), "111.00");
+  const oldDocId = app.documentId(firstFile);
+  const beforeSelection = {
+    corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+    marker: markerFor("invoice-total"),
+  };
+  const secondFile = { name: "report.png", size: 5, lastModified: 2 };
+  chooseFiles([secondFile]);
+  let payload;
+  try {
+    app.buildExportPayload("invoice-json");
+    payload = { ok: true };
+  } catch (error) {
+    payload = { ok: false, message: error.message };
+  }
+  return {
+    beforeSelection,
+    oldDocId,
+    oldDocCorrections: app.correctionsForDocument(oldDocId),
+    afterSelection: {
+      corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+      activeDocKey: state.activeDocKey,
+      newDocKey: app.docKeyFor(secondFile, 0),
+      machine: state.machine,
+      resultsHidden: document.getElementById("results")
+        .classList.contains("hidden"),
+      payload,
+    },
+  };
+});
+
+scenario("T", async () => {
+  resetState(null, "placeholder.pdf");
+  const file = { name: "doc.pdf", size: 1, lastModified: 1 };
+  chooseFiles([file]);
+  chooseWorkflow("auto");
+  queueFetch(() => jsonResponse(singlePagePdf("A", "SHOP-A", "10.00", "10")));
+  await runButtonClick();
+  setInput(document.findInputById("invoice-total"), "50.00");
+  const beforeRerun = markerFor("invoice-total");
+  queueFetch(() => jsonResponse({ detail: "inference failed" }, false, 500));
+  await runButtonClick();
+  let exportAttempt;
+  try {
+    app.buildExportPayload("invoice-json");
+    exportAttempt = { ok: true };
+  } catch (error) {
+    exportAttempt = { ok: false, message: error.message };
+  }
+  return {
+    beforeRerun,
+    corrections: JSON.parse(JSON.stringify(state.correctionsByDoc)),
+    machine: state.machine,
+    resultsHidden: document.getElementById("results")
+      .classList.contains("hidden"),
+    status: document.getElementById("status").textContent,
+    exportAttempt,
+  };
+});
+
+scenarioChain.then(() => {
+  process.stdout.write(JSON.stringify({ scenarios }));
+});
