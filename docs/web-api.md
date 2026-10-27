@@ -39,6 +39,14 @@ documind-web
 full_text}` — one `items` entry per OCR region; `full_text` is one line
 per region (line grouping happens inside extraction).
 
+**Source identifiers are stable labels, never filesystem paths**: image
+responses carry `"source": "upload"` (tables: `"source_image": "upload"`);
+PDF page results carry `"upload#page0"`, `"upload#page1"`, ... — page
+identity and ordering stay with `page_index`. Server-local temporary
+upload/render paths never appear in any response, including error
+messages (client-safe error text keeps the failure reason, not the
+location).
+
 `InvoiceResponse` = `{source, invoice, provenance}` — same schema as
 `documind-extract` output; `provenance` maps fields to OCR regions
 (index + text + box) so the UI can highlight sources.
@@ -48,7 +56,17 @@ per region (line grouping happens inside extraction).
 
 Export `kind`: `ocr-json`, `ocr-txt`, `invoice-json`, `invoice-csv`,
 `invoice-xlsx`, `table-json`, `table-csv`, `table-xlsx`, `batch-zip`.
-Unknown kind → 422; table export with no tables → 422. Invoice
+Unknown kind → 422; table export with no tables → 422. Malformed table
+export payloads (non-object tables/cells, non-integer or boolean
+dimensions/coordinates, negative or out-of-bounds coordinates, missing
+required cell fields, unknown cell fields, non-list warnings) are
+rejected with 422 and stable detail messages — never an uncontrolled
+500. Zero dimensions (`rows: 0` / `columns: 0`) stay tolerated for
+export compatibility and produce empty artifacts; the recognition
+pipeline itself always emits at least 1×1. JSON exports pass through
+untouched by design; the materializing paths (CSV/XLSX, invoice and
+table corrections) validate before use.
+Invoice
 CSV/XLSX materialize `user_corrections` (validated client paths) into a
 fresh copy; formula-injection policy re-applied.
 
@@ -86,6 +104,15 @@ with 422 (no silent ignoring, no arbitrary object paths). The original
 more** tables it returns a ZIP archive (`tables.zip`) containing
 `tables_t0.csv`, `tables_t1.csv`, ... (sanitized entry names). Zero
 tables → 422.
+
+### XLSX worksheet naming
+
+Sheet names are generated from `table_id` at export time and never
+mutate the JSON result: Excel-illegal characters (`\ / * ? : [ ]`)
+become `_`, titles are capped at Excel's 31-character limit, empty
+titles fall back to `"Table"`, and case-insensitive collisions get
+deterministic `_2`, `_3`… suffixes. Every table keeps a distinct sheet
+(no table is dropped).
 
 ### Resource limits
 

@@ -184,3 +184,65 @@ class TestXlsxExport:
         assert sheet.cell(row=1, column=2).value == "Qty"
         assert sheet.cell(row=2, column=1).value == "Coffee"
         assert sheet.cell(row=2, column=2).value in ("", None)
+
+
+class TestExcelSheetTitleSafety:
+    """openpyxl silently SAVES worksheet titles containing XML-illegal
+    control characters or unpaired surrogates, but the produced
+    xl/workbook.xml is not well-formed XML 1.0 — Excel and every strict
+    parser reject the whole file. excel_sheet_title() must apply the
+    same character policy to titles that _xlsx_text() applies to cell
+    values."""
+
+    @staticmethod
+    def _single_table(table_id):
+        return Table(
+            table_id=table_id, source_image="img.png", rows=1, columns=1,
+            cells=[TableCell(row_index=0, column_index=0, text="x",
+                             bounding_box=[[0, 0], [1, 0], [1, 1], [0, 1]],
+                             source_ocr_indices=[], confidence=0.9)],
+            warnings=[],
+        )
+
+    @staticmethod
+    def _workbook_xml_bytes(path):
+        import zipfile
+        with zipfile.ZipFile(path) as archive:
+            return archive.read("xl/workbook.xml")
+
+    def _assert_valid_artifact(self, tmp_path, table_id):
+        import xml.etree.ElementTree as ET
+
+        from openpyxl import load_workbook
+
+        path = export_xlsx(TableResult(source_image="img.png",
+                                       tables=[self._single_table(table_id)]),
+                           tmp_path / "out.xlsx")
+        raw = self._workbook_xml_bytes(path)
+        ET.fromstring(raw)  # strict XML 1.0: must be well-formed
+        workbook = load_workbook(path)
+        assert workbook.sheetnames, "no table may be dropped"
+        return workbook.sheetnames[0]
+
+    @pytest.mark.parametrize("table_id,expected", [
+        ("bad\x00title", "badtitle"),
+        ("bad\x01title", "badtitle"),
+        ("bad\x0btitle", "badtitle"),
+        ("bad\ud800title", "badtitle"),
+    ])
+    def test_xml_illegal_title_characters_are_stripped(
+            self, tmp_path, table_id, expected):
+        title = self._assert_valid_artifact(tmp_path, table_id)
+        assert title == expected
+
+    def test_control_only_title_falls_back_to_table(self, tmp_path):
+        title = self._assert_valid_artifact(tmp_path, "\x00\x01\x0b")
+        assert title == "Table"
+
+    def test_valid_vietnamese_title_preserved(self, tmp_path):
+        title = self._assert_valid_artifact(tmp_path, "Bảng Doanh Thu 2026")
+        assert title == "Bảng Doanh Thu 2026"
+
+    def test_normal_titles_unchanged_after_fix(self, tmp_path):
+        title = self._assert_valid_artifact(tmp_path, "table_0")
+        assert title == "table_0"

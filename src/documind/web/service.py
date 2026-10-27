@@ -17,6 +17,21 @@ from ..tables.pipeline import TableRecognitionError, recognize_tables
 
 logger = logging.getLogger(__name__)
 
+# Web responses never carry server-local filesystem paths: uploads and
+# PDF page renders live in temporary files that are deleted after the
+# request, so their paths are both sensitive and meaningless to clients.
+# Stable labels keep per-page identity without leaking locations.
+WEB_SOURCE_LABEL = "upload"
+
+
+def _safe_error(exc: Exception, source: Path) -> str:
+    """Client-safe error text: the local source path never leaves the
+    process. Underlying engine/pipeline errors embed the path they were
+    handed; the exact string is replaced (targeted, not a global rewrite
+    of message content)."""
+    return str(exc).replace(str(source), WEB_SOURCE_LABEL)
+
+
 _engine_lock = threading.Lock()
 _inference_lock = threading.Lock()
 _engine: PaddleOcrEngine | None = None
@@ -55,12 +70,14 @@ def ocr_document(source: Path) -> dict:
         with _inference_lock:
             raw_pages = engine.predict(str(source))
     except OcrEngineError as exc:
-        raise DocumentProcessingError(str(exc)) from exc
+        raise DocumentProcessingError(_safe_error(exc, source)) from exc
     except Exception as exc:  # paddle runtime errors, defensive
         logger.exception("OCR inference failed")
-        raise DocumentProcessingError(f"OCR inference failed: {exc}") from exc
+        raise DocumentProcessingError(
+            _safe_error(Exception(f"OCR inference failed: {exc}"), source)
+        ) from exc
     raw_page = raw_pages[0] if raw_pages else {}
-    return normalize_result(raw_page, source=str(source)).to_dict()
+    return normalize_result(raw_page, source=WEB_SOURCE_LABEL).to_dict()
 
 
 def extract_invoice(ocr_document_data: dict) -> dict:
@@ -85,15 +102,19 @@ def tables_from_document(source: Path, ocr_items: dict | list | None = None) -> 
     """
     items = ocr_items.get("items") if isinstance(ocr_items, dict) else ocr_items
     try:
-        return recognize_tables(
+        result = recognize_tables(
             source,
             ocr_items=items if items is not None else None,
             ocr_runner=None if items is not None else _shared_ocr_runner,
         ).to_dict()
     except TableRecognitionError as exc:
-        raise DocumentProcessingError(str(exc)) from exc
+        raise DocumentProcessingError(_safe_error(exc, source)) from exc
     except OcrEngineError as exc:
-        raise DocumentProcessingError(str(exc)) from exc
+        raise DocumentProcessingError(_safe_error(exc, source)) from exc
+    result["source_image"] = WEB_SOURCE_LABEL
+    for table in result.get("tables", []):
+        table["source_image"] = WEB_SOURCE_LABEL
+    return result
 
 
 def process_unified(source: Path, workflows: list[str]) -> dict:
@@ -102,7 +123,7 @@ def process_unified(source: Path, workflows: list[str]) -> dict:
     OCR runs at most once: table assignment reuses the items produced for
     the OCR/invoice workflows.
     """
-    result: dict = {"workflows": workflows, "source": str(source)}
+    result: dict = {"workflows": workflows, "source": WEB_SOURCE_LABEL}
     ocr_result = None
     if "ocr" in workflows or "invoice" in workflows or "table" in workflows:
         if "ocr" in workflows:
@@ -138,8 +159,8 @@ def process_pdf(content: bytes, workflows: list[str], output_dir: Path,
         try:
             pages.append({
                 "page_index": page_index,
-                "source": str(page_path),
                 **process_unified(page_path, workflows),
+                "source": f"{WEB_SOURCE_LABEL}#page{page_index}",
             })
         except DocumentProcessingError as exc:
             errors.append(f"page {page_index}: {exc}")
