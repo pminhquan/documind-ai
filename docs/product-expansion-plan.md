@@ -34,7 +34,7 @@ deployment in the current scope.
 | M5C — Vietnamese extraction rules | ✅ Complete (extraction layer) | Labels + VND money rules; **OCR recognition not validated** |
 | M5D — performance baseline | ✅ Complete (synthetic/local) | `reports/benchmark-local.md`; runtime numbers, not accuracy |
 | Post-audit regression fixes | ✅ Integrated | P1/P2 audit fixes, D-17, D-19, XLSX title safety |
-| D-16 — short-receipt line items | 🔲 Pending | Next priority; needs a letterhead/header redesign |
+| D-16 — short-receipt line items | 🟡 Draft PR (not merged) | Headerless region selection implemented, tested, and specified; `main` unchanged until review/merge |
 | D-22 — malformed eval inputs | 🔲 Pending | Structural validation for prediction/ground-truth data |
 | M4B Phase 2 — real-document evaluation | 🔲 Pending | Blocked on privacy-cleared, manually annotated data |
 | M3B — borderless tables | 🔲 Deferred | Model-based structure recognition; later milestone |
@@ -112,16 +112,18 @@ synthetic input, not recognition-accuracy results.
 - All automated tests use mocked/synthetic/geometry-only inputs; the
   benchmark and historical smoke tests are not real-world accuracy
   evidence. M4B Phase 2 is the only path to genuine metrics.
-- Open defects include D-16, D-22, and other P3 audit items; revalidate
-  the audit against current code before starting them.
+- Open defects include D-16 (Draft PR in review, not merged; `main`
+  behavior unchanged), D-22, and other P3 audit items; revalidate the
+  audit against current code before starting them.
 
 ## Next tasks
 
 Ordered by prerequisite value; no new milestone should begin without its
 data/decision dependency.
 
-1. **D-16 — short-receipt line-item extraction.** Recover items on ≤3-line
-   kiosk receipts without dropping the whole item region.
+1. **D-16 — short-receipt line-item extraction.** Implementation is in a
+   Draft PR (not merged); review, merge, then update this status. Until
+   then `main` still drops the item region on ≤3-line kiosk receipts.
 2. **D-22 — malformed evaluation data handling.** Validate prediction and
    ground-truth structures so malformed files produce clean CLI errors
    (exit 2), never tracebacks.

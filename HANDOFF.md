@@ -300,7 +300,7 @@ At the post-D18 release checkpoint (2026-10-27), main SHA `130f32207e316330cba15
 | **Batch UI shows the last document** | There is no full batch navigator in the results panel |
 | **CSV UTF-8 without BOM** | Excel on Windows may display Vietnamese text incorrectly (D-21) |
 | **Long single-export filenames** | A very long stem can lose its extension at the 100-character download-header cap; batch ZIP is safe |
-| **Remaining audit defects** | D-16 (short-receipt line items), D-22 (malformed eval inputs), plus other P3 items; revalidate against current code before starting |
+| **Remaining audit defects** | D-16 has a Draft PR in review (not merged; `main` still uses the fixed 3-line skip), D-22 (malformed eval inputs), plus other P3 items; revalidate against current code before starting |
 | **Local-only** | 127.0.0.1, no CORS, no auth; do not expose |
 
 ---
@@ -320,7 +320,7 @@ At the post-D18 release checkpoint (2026-10-27), main SHA `130f32207e316330cba15
 | **M5D** | ✅ Done | Synthetic/local performance baseline (`reports/benchmark-local.md`) |
 | **Post-audit fixes** | ✅ Integrated | P1/P2 audit regressions; D-17 export 422 contract; D-19 stable source labels; XLSX worksheet-title hardening |
 | **M4B Phase 2** | 🔲 Pending | Needs privacy-cleared, manually annotated real documents |
-| **D-16** | 🔲 Pending | Short-receipt line-item extraction |
+| **D-16** | 🟡 Draft PR (not merged) | Short-receipt line-item extraction implemented, tested, and specified in a Draft PR; `main` behavior unchanged until review/merge |
 | **D-22** | 🔲 Pending | Malformed evaluation-input handling |
 | **M3B** | 🔲 Deferred | Borderless table recognition (model-based) |
 
@@ -400,7 +400,7 @@ Documentation changes must still keep `python scripts/verify.py` green.
 11. **Long single-export filename:** the 100-character download-header cap can truncate the stem and lose the extension; prefer batch ZIP for long names until fixed.
 12. **CSV BOM (D-21):** UTF-8 without BOM; import explicitly in Excel on Windows.
 13. **Browser smoke ≠ accuracy:** mocked inference in Chromium proves UI wiring only.
-14. **Open defects:** D-16, D-22, and other P3 audit items remain; do not silently mark them fixed without tests.
+14. **Open defects:** D-16 has a Draft PR in review and remains pending on `main`; D-22 and other P3 audit items remain open. Do not mark any of them fixed on `main` without tests and a merge.
 
 ---
 
@@ -408,7 +408,7 @@ Documentation changes must still keep `python scripts/verify.py` green.
 
 Actual remaining backlog, in recommended order:
 
-1. **D-16 — short receipt line-item extraction:** recover line items on ≤3-line kiosk receipts without the current `start = 3` heuristic dropping all of them.
+1. **D-16 — short receipt line-item extraction:** implementation is in a Draft PR (not merged); review it, confirm the spec/test evidence, then merge and update this status. `main` still drops items on ≤3-line kiosk receipts via the `start = 3` heuristic.
 2. **D-22 — malformed evaluation data handling:** structural validation so malformed prediction/ground-truth files produce clean CLI errors (exit 2), not tracebacks.
 3. **Relevant P3 audit items:** revalidate the 2026-10-26 audit against current code; prioritize export/UX/data-integrity items (e.g. D-20 locale-sensitive dates, D-21 CSV BOM, D-23/D-24 dataset lifecycle) over speculative features.
 4. **M4B Phase 2 — real-document evaluation:** collect privacy-cleared, manually annotated documents (10–20 pilot: Vietnamese receipts, invoice-style pages, ruled-table pages), onboard via `documind-dataset`, evaluate with provenance `real`, and publish the first honest accuracy report. Data collection/annotation can proceed in parallel with 1–3 when data becomes available.

@@ -57,8 +57,9 @@ results.
 ### Not yet implemented
 
 - Genuine OCR accuracy evaluation on real documents (M4B Phase 2).
-- Short-receipt line-item recovery (D-16) and malformed evaluation-input
-  hardening (D-22).
+- Short-receipt line-item recovery (D-16 — implementation in a Draft PR,
+  not merged into `main`; main keeps the documented `start = 3`
+  limitation) and malformed evaluation-input hardening (D-22).
 - Borderless table recognition (M3B, deferred).
 - Vietnamese OCR model/language benchmarking on real data.
 - Database, job queue/resume, or multi-user deployment (not planned for
@@ -396,9 +397,9 @@ reports/             evaluation results, benchmark, audits (m3a, m4a,
   (`"."`, `".."`) can produce odd (non-traversing) ZIP entry names;
   extractors drop them and the UI cannot generate them.
 - Local-only, no CORS, no authentication; do not expose the server.
-- Remaining P3 audit items (D-16, D-22, and other small defects) are
-  tracked in [HANDOFF.md](HANDOFF.md) and the
-  [baseline audit](reports/audits/2026-10-26-baseline-audit.md).
+- Remaining P3 audit items (D-16 — Draft PR in review, not merged; D-22
+  and other small defects) are tracked in [HANDOFF.md](HANDOFF.md) and
+  the [baseline audit](reports/audits/2026-10-26-baseline-audit.md).
 
 ## Roadmap
 
@@ -415,7 +416,8 @@ reports/             evaluation results, benchmark, audits (m3a, m4a,
 - ~~**M5C:** Vietnamese extraction rules (labels, VND money formats)~~ ✓
   — OCR recognition accuracy not validated
 - ~~**M5D:** synthetic/local performance baseline and benchmark tooling~~ ✓
-- **D-16:** short-receipt line-item extraction (pending)
+- **D-16:** short-receipt line-item extraction (Draft PR in review;
+  not merged into `main`)
 - **D-22:** malformed evaluation-input handling (pending)
 - **Remaining P3 audit items** (pending, prioritized in HANDOFF)
 - **M4B Phase 2:** evaluate on privacy-cleared, manually annotated real

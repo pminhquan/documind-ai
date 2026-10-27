@@ -503,3 +503,566 @@ class TestHeaderFieldRobustness:
     def test_standalone_dong_sign_is_currency(self):
         result = extract(ocr_doc([[("Gia: 5.000 đ", 10)]]))
         assert result.invoice.currency == "VND"
+
+
+class TestShortHeaderlessReceipts:
+    """D-16: short receipts without a table header must not lose their
+    line items to a fixed 3-line letterhead skip. Headerless candidates
+    need a product-like description, monetary evidence, no metadata
+    markers, and a summary row below them to confirm the item region."""
+
+    def test_two_line_receipt_recovers_one_item(self):
+        result = extract(ocr_doc([
+            [("COFFEE 25.000", 10)],
+            [("TOTAL 25.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [
+            (item.description, item.quantity, item.unit_price, item.line_total)
+            for item in invoice.line_items
+        ] == [("COFFEE", None, None, money("25000"))]
+        assert invoice.total == money("25000")
+        assert invoice.validation_status == STATUS_REVIEW
+        assert "line_items[0].quantity" not in result.provenance
+        assert "line_items[0].unit_price" not in result.provenance
+        assert result.provenance["line_items[0].line_total"].ocr_index == 0
+        assert result.provenance["line_items[0].line_total"].text == "COFFEE 25.000"
+
+    def test_merged_line_total_provenance_points_at_amount_token(self):
+        result = extract(ocr_doc([
+            [("COFFEE 25.000", 10), ("đ", 220)],
+            [("TOTAL 25.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [
+            (item.description, item.line_total)
+            for item in invoice.line_items
+        ] == [("COFFEE", money("25000"))]
+        provenance = result.provenance["line_items[0].line_total"]
+        assert provenance.ocr_index == 0
+        assert provenance.text == "COFFEE 25.000"
+
+    def test_two_grouped_amounts_on_one_row_are_not_a_phone(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("ÁO THUN", 10), ("125.000", 150), ("250.000", 330)],
+            [("TOTAL", 10), ("250.000", 330)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [
+            (item.description, item.line_total)
+            for item in invoice.line_items
+        ] == [("ÁO THUN", money("250000"))]
+        assert invoice.total == money("250000")
+        assert invoice.validation_status == STATUS_OK
+
+    def test_qty_row_with_unit_price_and_total_is_not_a_phone(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("TEA", 10), ("2 x 125.000", 150), ("250.000", 330)],
+            [("TOTAL", 10), ("250.000", 330)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [
+            (item.description, item.quantity, item.unit_price, item.line_total)
+            for item in invoice.line_items
+        ] == [("TEA", money("2"), money("125000"), money("250000"))]
+        assert invoice.total == money("250000")
+        assert invoice.validation_status == STATUS_OK
+
+    def test_supplier_letterhead_stays_out_of_items(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("MILK 12.000", 10)],
+            [("TOTAL 12.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert invoice.supplier == "MINI MART"
+        assert [item.description for item in invoice.line_items] == ["MILK"]
+        assert invoice.line_items[0].line_total == money("12000")
+        assert invoice.total == money("12000")
+        assert invoice.validation_status == STATUS_OK
+        assert result.provenance["line_items[0].description"].ocr_index == 1
+
+    def test_headerless_items_keep_reading_order_and_provenance(self):
+        result = extract(ocr_doc([
+            [("TEA 15.000", 10)],
+            [("COOKIE 10.000", 10)],
+            [("TOTAL 25.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [
+            (item.description, item.line_total)
+            for item in invoice.line_items
+        ] == [("TEA", money("15000")), ("COOKIE", money("10000"))]
+        assert invoice.total == money("25000")
+        assert result.provenance["line_items[0].line_total"].ocr_index == 0
+        assert result.provenance["line_items[1].line_total"].ocr_index == 1
+
+    def test_vietnamese_headerless_receipt_preserves_diacritics(self):
+        result = extract(ocr_doc([
+            [("CÀ PHÊ SỮA 25.000 đ", 10)],
+            [("TRÀ ĐÀO 30.000 đ", 10)],
+            [("TỔNG CỘNG 55.000 đ", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert invoice.currency == "VND"
+        assert [item.description for item in invoice.line_items] == [
+            "CÀ PHÊ SỮA",
+            "TRÀ ĐÀO",
+        ]
+        assert [item.line_total for item in invoice.line_items] == [
+            money("25000"),
+            money("30000"),
+        ]
+        assert invoice.total == money("55000")
+        assert invoice.validation_status == STATUS_REVIEW
+
+    def test_attached_dong_sign_is_accepted_on_merged_item_rows(self):
+        result = extract(ocr_doc([
+            [("CÀ PHÊ SỮA 25.000đ", 10)],
+            [("TỔNG CỘNG 25.000đ", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [
+            (item.description, item.line_total)
+            for item in invoice.line_items
+        ] == [("CÀ PHÊ SỮA", money("25000"))]
+        assert invoice.total == money("25000")
+
+    @pytest.mark.parametrize("header_cells", [
+        [("ITEM", 10), ("QTY x PRICE LINE TOTAL", 150)],
+        [("SẢN PHẨM", 10), ("SỐ LƯỢNG ĐƠN GIÁ THÀNH TIỀN", 150)],
+    ])
+    def test_explicit_header_remains_authoritative(self, header_cells):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            header_cells,
+            [("SOAP", 10), ("2 x 2.50", 150), ("5.00", 330)],
+            [("TOTAL", 10), ("5.00", 330)],
+        ]), source="header")
+        invoice = result.invoice
+        assert len(invoice.line_items) == 1
+        item = invoice.line_items[0]
+        assert (item.description, item.quantity, item.unit_price, item.line_total) == (
+            "SOAP", money("2"), money("2.50"), money("5.00")
+        )
+        assert all("ITEM" not in i.description for i in invoice.line_items)
+        assert all("SẢN PHẨM" not in i.description for i in invoice.line_items)
+        assert invoice.total == money("5.00")
+        assert invoice.validation_status == STATUS_OK
+
+    def test_explicit_header_does_not_parse_metadata_rows_as_items(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("ITEM", 10), ("QTY x PRICE LINE TOTAL", 150)],
+            [("SOAP", 10), ("2 x 2.50", 150), ("5.00", 330)],
+            [("Tel: 0909 123 456", 10)],
+            [("TOTAL", 10), ("5.00", 330)],
+        ]), source="header")
+        invoice = result.invoice
+        assert [
+            (item.description, item.line_total)
+            for item in invoice.line_items
+        ] == [("SOAP", money("5.00"))]
+        assert invoice.total == money("5.00")
+        assert invoice.validation_status == STATUS_OK
+
+    def test_longer_headerless_receipt_recovers_items_before_old_cutoff(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("123 Demo Street, Sample City", 10)],
+            [("Receipt #: 00001234", 10)],
+            [("Date: 2026-10-25 Time: 10:30", 10)],
+            [("SOAP 5.00", 10)],
+            [("MILK 2.50", 10)],
+            [("TOTAL 7.50", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == ["SOAP", "MILK"]
+        assert [item.line_total for item in invoice.line_items] == [
+            money("5.00"),
+            money("2.50"),
+        ]
+        assert invoice.total == money("7.50")
+        assert invoice.validation_status == STATUS_OK
+        for item in invoice.line_items:
+            assert "Date" not in item.description
+            assert "Receipt" not in item.description
+
+    @pytest.mark.parametrize("metadata_line", [
+        "MINI MART",
+        "123 Demo Street, Sample City",
+        "123 Le Loi Street, Quan 1, 700000",
+        "Store #123",
+        "Store 123",
+        "Cửa hàng số 5",
+        "MINI MART 0909 123 456",
+        "Tel: 090 123 4567",
+        "Hotline: 1900 1234",
+        "ĐT: 0909 123 456",
+        "SĐT: (0909) 123-456",
+        "Receipt #: 00001234",
+        "Invoice No: A-123",
+        "Số hóa đơn: 000123",
+        "HÓA ĐƠN: 000123",
+        "HĐ: 000123",
+        "HĐ 000123",
+        "No. 000123",
+        "No. 1.234",
+        "HD 123.456",
+        "Số: 000123",
+        "Phiếu 000123",
+        "Mã KH 123.456",
+        "123 Lê Lợi, Bến Thành, 700000",
+        "Date: 2026-10-25 Time: 10:30",
+        "25/10/2026 12:30",
+        "Tax ID: 0123456789",
+        "MST: 0312345678",
+        "TXN 9876543210",
+        "TXN 1,234,567",
+        "Invoice No. 1.234",
+        "Receipt No. 1.234",
+        "Order 1.234",
+        "Bill 000123",
+        "Hotline 1900 1234",
+        "Tel 090 123 4567",
+        "ĐT 04 3825 1234",
+        "Fax 3825 1234",
+        "Hotline 3825 1234",
+        "ĐT 3825 1234",
+        "Phone 3825 1234",
+        "Mobile 3825 1234",
+        "LH: 1900 1234",
+        "Mã giao dịch: 9876543210",
+        "SUBTOTAL 25.000",
+        "VAT 10%",
+        "TOTAL 25.000",
+        "CASH 25.000",
+        "DEBIT CARD 25.000",
+        "VISA CREDIT 25.000",
+        "CHANGE 5.000",
+        "DISCOUNT 2.000",
+    ])
+    def test_metadata_and_summary_rows_never_become_items(self, metadata_line):
+        result = extract(ocr_doc([
+            [(metadata_line, 10)],
+            [("TOTAL 25.000", 10)],
+        ]), source="metadata")
+        assert result.invoice.line_items == []
+        assert result.invoice.total == money("25000")
+
+    @pytest.mark.parametrize("letterhead", [
+        "TẠP HÓA 247",
+        "MINI MART #247",
+        "Circle K 123",
+        "123 Lê Lợi 700000",
+        "TẠP HÓA 247 ₫",
+        "MINI MART #247 ₫",
+    ])
+    def test_letterhead_number_is_not_an_item(self, letterhead):
+        result = extract(ocr_doc([
+            [(letterhead, 10)],
+            [("MILK 12.000", 10)],
+            [("TOTAL 12.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == ["MILK"]
+        assert invoice.total == money("12000")
+
+    def test_store_name_with_number_is_not_an_item(self):
+        result = extract(ocr_doc([
+            [("MINI MART 24H", 10)],
+            [("MILK 12.000", 10)],
+            [("TOTAL 12.000", 10)],
+        ]), source="short")
+        assert [item.description for item in result.invoice.line_items] == ["MILK"]
+
+    @pytest.mark.parametrize("product_line, description, amount", [
+        ("PHONE CASE 25.000", "PHONE CASE", "25000"),
+        ("PHONE CASE 1.250.000", "PHONE CASE", "1250000"),
+        ("PHONE 25.000.000", "PHONE", "25000000"),
+        ("ADDRESS BOOK 25.000", "ADDRESS BOOK", "25000"),
+        ("STORE BRAND MILK 25.000", "STORE BRAND MILK", "25000"),
+        ("Invoice Paper 25.000", "Invoice Paper", "25000"),
+        ("Invoice A4 Paper 25.000", "Invoice A4 Paper", "25000"),
+        ("TEL 40W LAMP 25.000", "TEL 40W LAMP", "25000"),
+        ("FAX 500 SHEETS 25.000", "FAX 500 SHEETS", "25000"),
+        ("ĐIỆN THOẠI 25.000", "ĐIỆN THOẠI", "25000"),
+        ("BÀN ỦI 1800 25.000", "BÀN ỦI 1800", "25000"),
+        ("LAPTOP 1900 25.000", "LAPTOP 1900", "25000"),
+        ("STAFF PICK COFFEE 25.000", "STAFF PICK COFFEE", "25000"),
+        ("CUSTOMER FAVORITE 25.000", "CUSTOMER FAVORITE", "25000"),
+        ("1 KG ĐƯỜNG TRẮNG 20.000", "1 KG ĐƯỜNG TRẮNG", "20000"),
+        ("2 BOWL PHO 25.000", "2 BOWL PHO", "25000"),
+        ("2 ĐÔI QUẦN JEANS 500.000", "2 ĐÔI QUẦN JEANS", "500000"),
+        ("2 PHỞ 100.000", "2 PHỞ", "100000"),
+        ("2 ĐƯỜNG 20.000", "2 ĐƯỜNG", "20000"),
+    ])
+    def test_product_names_containing_metadata_words_survive(
+        self, product_line, description, amount
+    ):
+        result = extract(ocr_doc([
+            [(product_line, 10)],
+            [("TOTAL 25.000", 10)],
+        ]), source="short")
+        assert [
+            (item.description, item.line_total)
+            for item in result.invoice.line_items
+        ] == [(description, money(amount))]
+
+    def test_tax_id_header_does_not_end_the_item_region(self):
+        result = extract(ocr_doc([
+            [("Tax ID: 0123456789", 10)],
+            [("COFFEE 25.000", 10)],
+            [("TOTAL 25.000", 10)],
+        ]), source="short")
+        assert [item.description for item in result.invoice.line_items] == ["COFFEE"]
+        assert result.invoice.total == money("25000")
+        assert result.invoice.tax is None
+
+    def test_tax_id_row_is_not_read_as_monetary_tax(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("ITEM", 10), ("QTY x PRICE LINE TOTAL", 150)],
+            [("SOAP", 10), ("2 x 2.50", 150), ("5.00", 330)],
+            [("Tax ID: 0123456789", 10)],
+            [("TOTAL", 10), ("5.00", 330)],
+        ]), source="header")
+        invoice = result.invoice
+        assert invoice.tax is None
+        assert invoice.total == money("5.00")
+        assert invoice.validation_status == STATUS_OK
+
+    def test_vietnamese_tax_id_row_is_not_read_as_monetary_tax(self):
+        result = extract(ocr_doc([
+            [("CÀ PHÊ SỮA 25.000", 10)],
+            [("Mã số thuế: 0312345678", 10)],
+            [("TỔNG CỘNG 25.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert invoice.tax is None
+        assert invoice.total == money("25000")
+
+    def test_card_payment_row_still_feeds_payment_validation(self):
+        result = extract(ocr_doc([
+            [("SOAP", 10), ("2 x 52.50", 150), ("105.00", 330)],
+            [("TOTAL", 10), ("105.00", 330)],
+            [("CARD PAYMENT", 10), ("110.00", 330)],
+            [("CHANGE", 10), ("3.00", 330)],
+        ]), source="short")
+        invoice = result.invoice
+        assert invoice.payment_amount == money("110.00")
+        assert invoice.change_amount == money("3.00")
+        assert invoice.validation_status == STATUS_INVALID
+        assert any(
+            "change_amount != payment_amount - total" in error
+            for error in invoice.validation_errors
+        )
+
+    def test_document_id_with_separate_currency_token_is_not_an_item(self):
+        result = extract(ocr_doc([
+            [("Invoice No. 1.234", 10), ("đ", 220)],
+            [("TOTAL 25.000", 10)],
+        ]), source="short")
+        assert result.invoice.line_items == []
+        assert result.invoice.total == money("25000")
+
+    def test_vietnamese_invoice_number_header_does_not_end_item_region(self):
+        result = extract(ocr_doc([
+            [("Số hóa đơn: 000123", 10)],
+            [("CÀ PHÊ SỮA 25.000", 10)],
+            [("TỔNG CỘNG 25.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert invoice.invoice_number == "000123"
+        assert [item.description for item in invoice.line_items] == ["CÀ PHÊ SỮA"]
+        assert invoice.total == money("25000")
+        assert invoice.validation_status == STATUS_OK
+
+    def test_payment_and_tax_rows_stay_out_of_items(self):
+        result = extract(ocr_doc([
+            [("TEA 15.000", 10)],
+            [("SUBTOTAL 15.000", 10)],
+            [("VAT 1.500", 10)],
+            [("TOTAL 16.500", 10)],
+            [("CASH 20.000", 10)],
+            [("CHANGE 3.500", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == ["TEA"]
+        assert invoice.subtotal == money("15000")
+        assert invoice.tax == money("1500")
+        assert invoice.total == money("16500")
+        assert invoice.payment_amount == money("20000")
+        assert invoice.change_amount == money("3500")
+        assert invoice.validation_status == STATUS_REVIEW
+
+    def test_recovered_items_participate_in_arithmetic_validation(self):
+        result = extract(ocr_doc([
+            [("COFFEE 25.000", 10)],
+            [("SUBTOTAL 30.000", 10)],
+            [("TOTAL 30.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [item.line_total for item in invoice.line_items] == [money("25000")]
+        assert invoice.subtotal == money("30000")
+        assert invoice.total == money("30000")
+        assert invoice.validation_status == STATUS_INVALID
+        assert any(
+            "subtotal != sum(line_items.line_total)" in error
+            for error in invoice.validation_errors
+        )
+
+    def test_vietnamese_summary_zone_excludes_payment_rows(self):
+        result = extract(ocr_doc([
+            [("CÀ PHÊ SỮA 25.000", 10)],
+            [("TRÀ ĐÀO 30.000", 10)],
+            [("TẠM TÍNH 55.000", 10)],
+            [("THUẾ GTGT 5.500", 10)],
+            [("TỔNG CỘNG 60.500", 10)],
+            [("TIỀN KHÁCH ĐƯA 100.000", 10)],
+            [("TIỀN THỪA 39.500", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == [
+            "CÀ PHÊ SỮA",
+            "TRÀ ĐÀO",
+        ]
+        assert invoice.subtotal == money("55000")
+        assert invoice.tax == money("5500")
+        assert invoice.total == money("60500")
+        assert invoice.payment_amount == money("100000")
+        assert invoice.change_amount == money("39500")
+        assert invoice.validation_status == STATUS_REVIEW
+
+    @pytest.mark.parametrize("phone_row", [
+        "Fax 3825 1234",
+        "ĐT 3825 1234",
+        "Phone 3825 1234",
+        "LH: 1900 1234",
+    ])
+    def test_unpunctuated_phone_row_is_not_a_description_continuation(
+        self, phone_row
+    ):
+        result = extract(ocr_doc([
+            [("CÀ PHÊ 25.000", 10)],
+            [(phone_row, 10)],
+            [("BÁNH MÌ 20.000", 10)],
+            [("TỔNG CỘNG 45.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == [
+            "CÀ PHÊ",
+            "BÁNH MÌ",
+        ]
+        assert result.provenance["line_items[1].description"].ocr_index == 2
+        assert invoice.total == money("45000")
+
+    def test_metadata_between_items_is_not_a_description_continuation(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("TEA 15.000", 10)],
+            [("Tel: 0909 123 456", 10)],
+            [("COOKIE 10.000", 10)],
+            [("TOTAL 25.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == ["TEA", "COOKIE"]
+        assert result.provenance["line_items[1].description"].ocr_index == 3
+
+    def test_address_with_abbreviated_wards_is_not_an_item(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("TEA 15.000", 10)],
+            [("123 Lê Lợi, P. Bến Thành, Q.1", 10)],
+            [("COOKIE 10.000", 10)],
+            [("TOTAL 25.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == ["TEA", "COOKIE"]
+        assert result.provenance["line_items[1].description"].ocr_index == 3
+
+    def test_multiline_description_after_first_item_keeps_provenance(self):
+        result = extract(ocr_doc([
+            [("MINI MART", 10)],
+            [("TEA 15.000", 10)],
+            [("SOAP", 10)],
+            [("LAVENDER", 10)],
+            [("5.000", 10)],
+            [("TOTAL 20.000", 10)],
+        ]), source="short")
+        items = result.invoice.line_items
+        assert [(item.description, item.line_total) for item in items] == [
+            ("TEA", money("15000")),
+            ("SOAP LAVENDER", money("5000")),
+        ]
+        assert result.provenance["line_items[1].description"].ocr_index == 2
+        assert result.provenance["line_items[1].description"].text == "SOAP"
+        assert result.provenance["line_items[1].line_total"].ocr_index == 4
+
+    def test_numeric_letterhead_line_is_not_a_description_continuation(self):
+        result = extract(ocr_doc([
+            [("000123", 10)],
+            [("TEA 15.000", 10)],
+            [("TOTAL 15.000", 10)],
+        ]), source="short")
+        assert [item.description for item in result.invoice.line_items] == ["TEA"]
+
+    def test_headerless_receipt_without_boxes_recovers_item(self):
+        document = {"items": [
+            {"text": "MINI MART"},
+            {"text": "MILK 12.000"},
+            {"text": "TOTAL 12.000"},
+        ]}
+        result = extract(document, source="short")
+        invoice = result.invoice
+        assert [item.description for item in invoice.line_items] == ["MILK"]
+        assert invoice.total == money("12000")
+        assert result.provenance["line_items[0].line_total"].box == []
+
+    def test_single_headerless_amount_line_is_not_fabricated(self):
+        result = extract(ocr_doc([[("COFFEE 25.000", 10)]]), source="short")
+        invoice = result.invoice
+        assert invoice.line_items == []
+        assert invoice.total is None
+        assert invoice.validation_status == STATUS_REVIEW
+        assert any("ambiguous:" in error for error in invoice.validation_errors)
+
+    def test_headerless_rows_without_summary_are_not_guessed(self):
+        result = extract(ocr_doc([
+            [("TEA 15.000", 10)],
+            [("COOKIE 10.000", 10)],
+        ]), source="short")
+        invoice = result.invoice
+        assert invoice.line_items == []
+        assert invoice.total is None
+        assert invoice.validation_status == STATUS_REVIEW
+        assert any("ambiguous:" in error for error in invoice.validation_errors)
+
+    def test_total_only_document_has_no_items(self):
+        result = extract(ocr_doc([[("TOTAL 25.000", 10)]]), source="short")
+        invoice = result.invoice
+        assert invoice.line_items == []
+        assert invoice.total == money("25000")
+        assert invoice.validation_status == STATUS_REVIEW
+
+    def test_summary_only_document_has_no_items(self):
+        result = extract(ocr_doc([
+            [("SUBTOTAL 20.000", 10)],
+            [("VAT 2.000", 10)],
+            [("TOTAL 22.000", 10)],
+        ]), source="summary")
+        invoice = result.invoice
+        assert invoice.line_items == []
+        assert invoice.subtotal == money("20000")
+        assert invoice.tax == money("2000")
+        assert invoice.total == money("22000")
+        assert invoice.validation_status == STATUS_REVIEW
+
+    def test_supplier_only_document_has_no_items(self):
+        result = extract(ocr_doc([[("MINI MART", 10)]]), source="short")
+        invoice = result.invoice
+        assert invoice.supplier == "MINI MART"
+        assert invoice.line_items == []
+        assert invoice.validation_status == STATUS_REVIEW
