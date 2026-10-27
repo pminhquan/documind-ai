@@ -1149,6 +1149,31 @@ scenario("T", async () => {
   };
 });
 
+scenario("U", async () => {
+  resetState(null, "placeholder.png");
+  const okFile = { name: "batch-errors.pdf", size: 1, lastModified: 1 };
+  const badFile = { name: "broken.png", size: 2, lastModified: 2 };
+  chooseFiles([okFile, badFile]);
+  chooseWorkflow("auto");
+  queueFetch(() => jsonResponse(singlePagePdf("OK", "SHOP-OK", "10.00", "10")));
+  queueFetch(() => jsonResponse({ detail: "inference failed" }, false, 500));
+  await runButtonClick();
+  return {
+    payload: app.buildBatchPayload(),
+    status: document.getElementById("status").textContent,
+  };
+});
+
+scenario("V", async () => {
+  resetState(null, "placeholder.pdf");
+  const okFile = { name: "batch-errors.pdf", size: 1, lastModified: 1 };
+  chooseFiles([okFile]);
+  chooseWorkflow("auto");
+  queueFetch(() => jsonResponse(singlePagePdf("OK", "SHOP-OK", "10.00", "10")));
+  await runButtonClick();
+  return { payload: app.buildBatchPayload() };
+});
+
 scenarioChain.then(() => {
   process.stdout.write(JSON.stringify({ scenarios }));
 });

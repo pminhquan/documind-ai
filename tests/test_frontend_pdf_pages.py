@@ -661,7 +661,7 @@ class TestBatchEntryLimit:
         data = scenario_data(scenarios, "Q")
         files = data["ninePlusOne"]["data"]["files"]
         assert len(files) == 10
-        assert files[-1]["filename"] == "batch-errors.json"
+        assert files[0]["filename"] == "batch-errors.json"
         entries = zip_json_entries(export(client, data["ninePlusOne"]))
         assert len(entries) == 10
         assert "doc10.json" not in entries
@@ -733,3 +733,31 @@ class TestSelectionCorrectionLifecycle:
             "ok": False,
             "message": "No successful result is selected to export.",
         }
+
+
+class TestFailureReportName:
+    def test_error_report_keeps_reserved_name_in_mixed_batch(
+            self, scenarios, client):
+        data = scenario_data(scenarios, "U")
+        files = data["payload"]["data"]["files"]
+        assert len(files) == 2
+        assert files[0]["filename"] == "batch-errors.json"
+        assert files[0]["data"] == {"failed_documents": [
+            {"filename": "broken.png", "error": "inference failed"}]}
+        entries = zip_json_entries(export(client, data["payload"]))
+        assert sorted(entries) == ["batch-errors.json", "batch-errors_2.json"]
+        assert entries["batch-errors.json"] == files[0]["data"]
+        success = entries["batch-errors_2.json"]
+        assert success["kind"] == "pdf"
+        assert success["pages"][0]["invoice"]["invoice"]["supplier"] == \
+            "SHOP-OK"
+
+    def test_success_only_batch_with_reserved_stem_is_unchanged(
+            self, scenarios, client):
+        data = scenario_data(scenarios, "V")
+        files = data["payload"]["data"]["files"]
+        assert [item["filename"] for item in files] == ["batch-errors.json"]
+        entries = zip_json_entries(export(client, data["payload"]))
+        assert list(entries) == ["batch-errors.json"]
+        assert entries["batch-errors.json"]["pages"][0]["invoice"]["invoice"][
+            "supplier"] == "SHOP-OK"

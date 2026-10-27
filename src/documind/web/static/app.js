@@ -763,8 +763,11 @@ function buildBatchPayload() {
     };
   });
   // Failures stay explicit; they never become fake OCR/invoice/table data.
+  // Placed first so the reserved batch-errors.json name always belongs to
+  // the error report; a colliding success entry gets a deterministic
+  // suffix from the server's allocator instead.
   if (failed.length) {
-    files.push({
+    files.unshift({
       kind: "ocr-json",
       filename: "batch-errors.json",
       data: { failed_documents: failed.map((result) => ({

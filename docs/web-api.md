@@ -114,8 +114,11 @@ output. A cancelled run exports only the documents it actually
 completed. Batch results export via `batch-zip` (≤ 10 entries including
 the failure report, sanitized deterministically deduplicated names,
 per-entry kind validation) through the "Export batch ZIP" control,
-shown once a multi-file run has produced results. No job queues or
-databases.
+shown once a multi-file run has produced results. Name uniqueness is
+case-insensitive (sanitized names are ASCII): the first entry keeps its
+original case, later colliding names get `_2`, `_3`, ... suffixes, since
+case-distinct ZIP entries merge when extracted on Windows/macOS. No job
+queues or databases.
 
 Each successfully processed PDF contributes **one** JSON entry (`kind:
 "ocr-json"`) carrying the complete page-level result rather than an
@@ -161,8 +164,11 @@ Image batch entries:
   `{workflow: "auto", ocr, invoice, tables, user_corrections}` — so no
   generated artifact is dropped.
 
-Processing failures remain explicit in `batch-errors.json`; failed
-documents never become fake OCR/invoice/table results.
+Processing failures remain explicit in `batch-errors.json`, which is
+written as the first entry whenever failures exist; if a successful
+document's derived name collides with it, that document's entry is
+deterministically suffixed (`batch-errors_2.json`) and both artifacts
+are kept. Failed documents never become fake OCR/invoice/table results.
 
 ### Corrections materialization (CSV/XLSX)
 
