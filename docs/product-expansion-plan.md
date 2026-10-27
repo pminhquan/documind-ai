@@ -1,96 +1,193 @@
 # Product Expansion Plan — DocuMind AI
 
-Prioritized plan for turning DocuMind AI into a polished, portfolio-worthy
-Document Intelligence application. Status is maintained here so work can
-resume after context loss.
+Prioritized milestone plan for DocuMind AI. This file is the single
+current roadmap; it is updated when milestones are delivered so work can
+resume after context loss. Historical planning is kept in
+[Historical context](#historical-context) and must not be read as current
+work.
+
+**Last verified checkpoint:** `main` @
+`130f32207e316330cba15d31c23558c6a2987607` (merge commit of PR #13,
+2026-10-27). Main CI: [run 40439790177](https://github.com/pminhquan/documind-ai/actions/runs/40439790177)
+— success, ruff clean, frontend gate green, 392 tests passing at that
+dated release checkpoint. Future HEADs may have a different test count;
+check CI.
 
 **Ground rules:** quality over quantity; no invented benchmarks or
-accuracy claims; real-document evaluation stays pending user-provided
-labeled data; PRs are vertically sliced and stay open for review;
-prefer completing PR B (web app) correctly over partially doing B–E.
+accuracy claims; real-document evaluation stays pending until
+privacy-cleared, manually annotated data exists; PRs are focused and
+stay open for review; documentation is updated in the same change as
+behavior; the project remains local-first with no database or public
+deployment in the current scope.
 
-## Progress checklist
+## Current milestone status
 
-- [x] Phase 0 — repository audit and baseline (main @ 7e7621f post PR #5, 223 tests green)
-- [x] Phase 1 / PR A — quality foundations + agent skills (this PR)
-- [x] Phase 2 / PR B — M5A: local FastAPI backend + web frontend
-- [x] Phase 3 / PR C — M5B: PDF input, batch processing, richer exports
-- [ ] Phase 4 / PR D — M5C: extraction robustness + Vietnamese labels/i18n (pending — next stacked PR; design notes: label lexicon separated from parsing, VND symbols, no metric redefinitions)
-- [ ] Phase 5 / PR E — performance profiling + release polish (pending — benchmark script + cold/warm inference measurement first)
-- [ ] Phase 5 / PR E — performance profiling + release polish
+| Milestone | Status | Evidence / note |
+|---|---|---|
+| M0/M1 — OCR baseline | ✅ Complete | PaddleOCR 3.x, PP-OCRv6 CPU, mocked tests |
+| M2 — invoice extraction | ✅ Complete | Deterministic rules, Decimal money, validation semantics |
+| M3A — ruled tables | ✅ Complete | OpenCV geometry + assignment; ruled grids only |
+| M4A — evaluation framework | ✅ Complete | CER/WER, invoice field accuracy, strict table metrics |
+| M4B Phase 1 — dataset onboarding | ✅ Complete | Anonymization gate, manual annotation, local predictions |
+| M5A — local web app | ✅ Complete | FastAPI + vanilla JS, uploads, workflows, corrections, exports |
+| M5B — PDF, batch, page exports | ✅ Complete | PDF page-indexed processing, batch ZIP, D-18 |
+| M5C — Vietnamese extraction rules | ✅ Complete (extraction layer) | Labels + VND money rules; **OCR recognition not validated** |
+| M5D — performance baseline | ✅ Complete (synthetic/local) | `reports/benchmark-local.md`; runtime numbers, not accuracy |
+| Post-audit regression fixes | ✅ Integrated | P1/P2 audit fixes, D-17, D-19, XLSX title safety |
+| D-16 — short-receipt line items | 🔲 Pending | Next priority; needs a letterhead/header redesign |
+| D-22 — malformed eval inputs | 🔲 Pending | Structural validation for prediction/ground-truth data |
+| M4B Phase 2 — real-document evaluation | 🔲 Pending | Blocked on privacy-cleared, manually annotated data |
+| M3B — borderless tables | 🔲 Deferred | Model-based structure recognition; later milestone |
 
-## PR A — Quality foundations (done)
+## Delivered work
 
-Acceptance criteria:
-- [x] Ruff lint clean across `src/`, `tests/`, `scripts/`; enforced in CI.
-- [x] `python scripts/verify.py` = ruff + pytest in one command.
-- [x] `AGENTS.md` documents architecture, commands, privacy, metric rules, DoD.
-- [x] Four focused agent skills under `.agents/skills/`.
-- [x] README/pyproject no longer carry stale totals or hardcoded test counts.
-- [x] Full test suite green; CI green.
+### M5A — local web application
 
-## PR B — M5A: local web application (done, stacked on PR A)
+FastAPI service + no-build vanilla JS frontend, bound to `127.0.0.1`.
+Images can be processed through OCR, invoice, table, or Auto workflows;
+results are editable, machine output is immutable, and corrections are
+exported alongside it. Upload validation, temp cleanup, serialized
+inference, and export safety are covered by tests.
 
-Goal: local-first FastAPI backend + vanilla JS frontend reusing the
-existing pipelines. Endpoint contracts documented; uploads untrusted
-(size/extension/content validation, temp cleanup, bounded inference
-concurrency, no public binding). Human-in-the-loop corrections keep
-machine output and user corrections separate. Acceptance:
-- [x] All endpoints tested with mocked inference including error paths
-      (24 web tests: security, exports read-back, HITL payload).
-- [x] Synthetic receipt processed end-to-end through the API with real
-      inference (30 OCR regions, invoice total 13.53, status ok).
-- [x] Bounding boxes scale with the preview image; provenance highlight
-      on hover/focus (implemented in app.js; UI walkthrough pending user).
-- [x] Invoice fields and table cells editable; corrections exported
-      alongside original machine output (`machine_output` +
-      `user_corrections`).
-- [x] CLI tools unchanged (223 pre-existing tests still green).
-- [x] API contract documented: docs/web-api.md.
+### M5B — PDF, batch, richer exports (including D-18)
 
-## PR C — M5B: PDF, batch, exports (pending)
+- Multi-page PDFs render via `pypdfium2` with hard limits (10 pages,
+  30 MP/page, 60 MP cumulative, 15k points/side) and page-indexed
+  results; per-page failures are explicit.
+- D-18 added page-local exports, opaque document identity (so duplicate
+  filenames never mix corrections), page switching/restoration, and
+  per-page/per-family Reset.
+- Batch runs process up to 10 files sequentially with partial success,
+  explicit failures, and a batch ZIP that preserves complete PDF page
+  data, image Auto artifacts, and page-local corrections.
+- ZIP names are sanitized, case-insensitively unique, extension-
+  preserving, and capped; `batch-errors.json` is the first entry when
+  failures exist. The server also enforces export payload bounds.
 
-pypdfium2-based PDF input (page images, per-page provenance, page
-limits), bounded batch processing with per-file errors and partial
-success, ZIP/CSV/XLSX exports with formula-injection and filename
-sanitization. Acceptance: deterministic multi-page fixtures, batches
-isolate errors, exports read back, single-image behavior unchanged.
+### M5C — Vietnamese extraction rules
 
-## PR D — M5C: extraction robustness / i18n (pending)
+Vietnamese invoice labels (diacritic-insensitive) and VND money formats
+are implemented and tested at the extraction layer. This is **not**
+evidence of Vietnamese OCR accuracy; the default model remains English
+and recognition quality is unmeasured.
 
-Vietnamese label lexicon (HÓA ĐƠN, TỔNG CỘNG, THUẾ, ...) separated from
-parsing, VND currency labels/symbols, documented Vietnamese number
-formats, table-recognition robustness (jitter, thickness, multiline) —
-each with regression tests and no metric redefinitions.
+### M5D — performance baseline
 
-## PR E — Performance + release polish (pending)
+`scripts/benchmark.py` records reproducible local CPU measurements
+(cold engine init, warm OCR, extraction, table geometry, unified request)
+in `reports/benchmark-local.md`. These are runtime measurements on
+synthetic input, not recognition-accuracy results.
 
-Measured baselines (cold init, warm inference, per-image time) before
-any optimization; engine reuse in batch; documented methodology; then
-screenshots/demo walkthrough and release checklist. No invented numbers.
+## Integrated quality fixes
 
-## Stage 0 (P0 repair) — done on PR #8 branch
+- **2026-10-26 baseline audit:** fixed 4 P1 defects (merged-row money
+  loss, summary-zone keyword gaps, invoice CSV/XLSX routing, table
+  correction paths) plus P2/P3 issues with regression tests; the
+  historical audit and its open backlog remain in
+  `reports/audits/2026-10-26-baseline-audit.md`.
+- **D-17:** malformed table export payloads now return 422 with stable
+  details instead of 500; worksheet titles are sanitized, capped, and
+  deduplicated.
+- **D-19:** API responses use stable `upload` / `upload#pageN` labels and
+  never disclose server temp paths.
+- **D-18:** page-level exports, correction identity/lifecycle, batch
+  preservation, case-insensitive ZIP naming, and the reserved failure
+  report.
+- **Post-audit verification:** ruff + Node frontend gate + pytest are
+  required in `python scripts/verify.py` and CI.
 
-- [x] 0.1 CRITICAL: app.js had a top-level `return` (orphaned batch-zip
-      block) — the whole frontend script failed to load. Fixed; batch
-      export now also excludes failed documents explicitly
-      (`batch-errors.json`). Regression gate added:
-      `scripts/check_browser_js.py` EXECUTES app.js under Node with DOM
-      stubs (catches runtime load errors that `node --check` misses);
-      wired into verify.py + pytest (`tests/test_frontend_gate.py`).
-- [ ] 0.2 frontend state consistency across files/pages — PENDING (next unit)
-- [ ] 0.3 pdf.py preflight dimension check before bitmap allocation — PENDING
-- [ ] 0.4 export hardening sweep — partially covered by earlier tests; full audit PENDING
+## Known limitations
 
-## Resume instructions (context exhausted 2026-10-25)
+- Ruled tables only; borderless/partial/rotated tables unsupported
+  (M3B deferred).
+- No cross-page invoice aggregation; PDF extraction is per page.
+- Vietnamese OCR recognition unvalidated; extraction rules only.
+- No database, job queue, resume, or multi-user deployment; batch runs
+  are sequential in the browser.
+- Batch results panel shows the last processed document; no full batch
+  navigator.
+- A very long source stem can lose its extension in a single-file
+  export download header (batch ZIP is safe).
+- CSV exports are UTF-8 without BOM (D-21).
+- All automated tests use mocked/synthetic/geometry-only inputs; the
+  benchmark and historical smoke tests are not real-world accuracy
+  evidence. M4B Phase 2 is the only path to genuine metrics.
+- Open defects include D-16, D-22, and other P3 audit items; revalidate
+  the audit against current code before starting them.
 
-1. `git checkout feat/m5b-pdf-batch-exports` (head after Stage 0.1 fix).
-2. Do Stage 0.2–0.4 (see PR #8 review findings), then Stages D–H per the
-   original mission; each is a stacked branch off the previous head.
-3. Keep the frontend gate green: `python scripts/check_browser_js.py`.
+## Next tasks
 
-## Known issues at audit time
+Ordered by prerequisite value; no new milestone should begin without its
+data/decision dependency.
 
-- README carried stale sample totals and hardcoded test counts (fixed in PR A).
-- No linting gate previously; several style violations had accumulated (fixed in PR A).
-- Real-document evaluation data: none available; onboarding tooling ready (M4B Phase 1).
+1. **D-16 — short-receipt line-item extraction.** Recover items on ≤3-line
+   kiosk receipts without dropping the whole item region.
+2. **D-22 — malformed evaluation data handling.** Validate prediction and
+   ground-truth structures so malformed files produce clean CLI errors
+   (exit 2), never tracebacks.
+3. **Relevant P3 audit items.** Revalidate and prioritize
+   export/data-integrity defects (e.g. D-20 locale-sensitive parsing,
+   D-21 CSV BOM, D-23/D-24 dataset lifecycle) ahead of speculative
+   features.
+4. **M4B Phase 2 — real-document evaluation.** Collect 10–20
+   privacy-cleared documents (Vietnamese receipts, invoice-style pages,
+   ruled-table pages), annotate by hand, onboard with
+   `documind-dataset`, predict, and evaluate with `provenance: real`.
+   Publish the first honest accuracy report. Data collection may proceed
+   in parallel with tasks 1–3.
+5. **Vietnamese OCR benchmarking.** Compare `lang="vi"` vs `lang="en"` on
+   the real evaluation set; record a model-selection decision before
+   tuning.
+6. **M3B — borderless table recognition.** Deferred until ruled-table
+   evidence and real-document evaluation are established.
+
+## Historical context
+
+The following is history, not current work. It explains how the project
+reached the current checkpoint and which decisions remain in force.
+
+- **Phase 0 — repository audit and baseline:** pre-M5A snapshot (main
+  @ `7e7621f`, post PR #5) with 223 tests green at the time; identified
+  quality gaps, stale docs, and missing gates.
+- **Phase 1 / PR A — quality foundations + agent skills:** ruff gate,
+  `scripts/verify.py`, `AGENTS.md`, agent skills. Decision: no hardcoded
+  test counts in prose; CI is the source of truth.
+- **Phase 2 / PR B (M5A):** local web app with endpoint contracts,
+  security validation, and human-in-the-loop corrections.
+- **Phase 3 / PR C (M5B):** PDF input, batch processing, ZIP/CSV/XLSX
+  exports, formula-injection protection and filename sanitization. The
+  original plan listed this as pending; it was delivered, then hardened.
+- **Phase 4 / PR D (M5C):** Vietnamese label/VND extraction rules,
+  separated from parsing; no metric redefinitions.
+- **Phase 5 / PR E (M5D):** measured local performance baseline before
+  any optimization; no invented numbers.
+- **Stage 0 repairs:** frontend top-level load failure fixed, browser
+  regression gate added, PDF preflight and export hardening completed.
+  The old Stage 0.2–0.4 "pending" checklist is superseded by delivered
+  work and tests.
+- **D-18 (PR #13):** closed the PDF page-export gap and the remaining
+  identity/ZIP naming defects. Three commits merged by merge commit
+  `130f322`; main CI verified.
+- **Decisions retained:** local-first, no database/deployment; metrics
+  and denominators change only with spec + regression tests; synthetic
+  results are never presented as real-world accuracy; borderless tables
+  stay deferred behind real-data evidence.
+
+Obsolete instructions from earlier drafts ("resume from
+`feat/m5b-pdf-batch-exports`", "next stacked PR", duplicate Phase 5) are
+removed. Git history retains the old plans if needed.
+
+## Agent handoff
+
+1. Inspect Git: `git status --short`, `git branch --show-current`,
+   `git fetch origin`, `git rev-parse origin/main`.
+2. Read `AGENTS.md` and `HANDOFF.md` before editing.
+3. Base new work on the latest verified `origin/main`, not a stale local
+   `main`; prefer a dedicated worktree.
+4. Create a focused branch (`feat/<milestone>-<slug>` or `docs/<slug>`).
+5. Run `python scripts/verify.py` before committing/pushing.
+6. Open a Draft PR with the verified checkpoint and test evidence; do not
+   merge without explicit owner authorization; never force-push or
+   rewrite history.
+7. Update README/HANDOFF/this plan when milestone state changes. Use a
+   dated checkpoint for test counts; do not assert a permanent total.

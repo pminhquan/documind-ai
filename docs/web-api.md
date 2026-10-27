@@ -1,4 +1,4 @@
-# Web API (M5A)
+# Web API (M5A; M5B and D-18 included)
 
 Local-first HTTP API served by `documind-web` (FastAPI). Default binding
 **127.0.0.1:8000** — the app never deploys publicly and no CORS is
@@ -73,8 +73,9 @@ fresh copy; formula-injection policy re-applied.
 ### PDF input (M5B)
 
 `/api/process` accepts PDFs (detected by `%PDF` magic). Pages render via
-pypdfium2 at ~144 DPI with bounds: **10 pages max**, 30 MP per page —
-violations return 400. Results are page-indexed
+pypdfium2 at ~144 DPI with bounds: **10 pages max**, **30 MP per page**,
+**60 MP cumulative** across pages, and **15,000 PDF points per side**
+(checked before scaling) — violations return 400. Results are page-indexed
 (`{kind: "pdf", page_count, pages: [{page_index, ocr, invoice, tables}],
 errors}`); a failing page is recorded in `errors` while others still
 process (partial success). The single-page extractor does not infer
