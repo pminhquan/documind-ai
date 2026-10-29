@@ -13,17 +13,21 @@ work.
 dated checkpoint. Future HEADs may have a different test count; check
 CI.
 
-**PR #15 base checkpoint:** `origin/main` @
+**PR #15 base checkpoint (historical):** `origin/main` @
 `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge, 2026-10-27;
 does not contain D-16). Check live `origin/main`/CI for the current
 HEAD.
 
-**D-16 / PR #15:** the short-receipt line-item extraction fix is
-implemented in PR #15 on base
-`31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge), which does
-**not** contain D-16. Check the live PR and current `main` HEAD for
-integration status; after integration, D-22 is the next prioritized
-engineering defect.
+**D-16 merge checkpoint:** `origin/main` @
+`231cd909924f75b4d46816ca028bbdca5b6107ef` (PR #15 merge, 2026-10-29;
+519 tests; CI run
+[40843248171](https://github.com/pminhquan/documind-ai/actions/runs/40843248171)).
+D-16's short-receipt line-item extraction is integrated on `main`.
+
+**D-22 / Draft PR:** evaluation-input validation is implemented in its
+Draft PR; check the live PR and current `main` HEAD for integration
+status. After D-22 integration, relevant P3 audit items are the next
+engineering work.
 
 **Ground rules:** quality over quantity; no invented benchmarks or
 accuracy claims; real-document evaluation stays pending until
@@ -46,8 +50,8 @@ deployment in the current scope.
 | M5C — Vietnamese extraction rules | ✅ Complete (extraction layer) | Labels + VND money rules; **OCR recognition not validated** |
 | M5D — performance baseline | ✅ Complete (synthetic/local) | `reports/benchmark-local.md`; runtime numbers, not accuracy |
 | Post-audit regression fixes | ✅ Integrated | P1/P2 audit fixes, D-17, D-19, XLSX title safety |
-| D-16 — short-receipt line items | 🟡 Implemented in PR #15 | Headerless region selection implemented, tested, and specified; check the live PR and current `main` HEAD for integration status |
-| D-22 — malformed eval inputs | 🔲 Pending | Structural validation for prediction/ground-truth data |
+| D-16 — short-receipt line items | ✅ Merged | PR #15 merge commit `231cd9`; headerless extraction integrated and tested |
+| D-22 — malformed eval inputs | 🟡 Implemented in Draft PR | Structural validation for prediction/ground-truth data; check the live PR and current `main` HEAD for integration status |
 | M4B Phase 2 — real-document evaluation | 🔲 Pending | Blocked on privacy-cleared, manually annotated data |
 | M3B — borderless tables | 🔲 Deferred | Model-based structure recognition; later milestone |
 
@@ -124,35 +128,33 @@ synthetic input, not recognition-accuracy results.
 - All automated tests use mocked/synthetic/geometry-only inputs; the
   benchmark and historical smoke tests are not real-world accuracy
   evidence. M4B Phase 2 is the only path to genuine metrics.
-- Open defects include D-22 and other P3 audit items; revalidate the
-  audit against current code before starting them. D-16's extraction fix
-  is implemented in PR #15; check the live PR and current `main` HEAD
-  for integration status.
+- Open defects include other P3 audit items; D-22's input validation is
+  implemented in its Draft PR (check the live PR and current `main` HEAD
+  for integration status). D-16 is integrated on `main`. Revalidate the
+  audit against current code before starting remaining items.
 
 ## Next tasks
 
-D-16's extraction fix is implemented in PR #15; verify the live PR and
-current `main` HEAD before assuming it is integrated. Once integrated,
-the remaining tasks below are ordered by prerequisite value; no new
+D-16 is integrated on `main` (PR #15, merge commit `231cd9`). D-22's
+input validation is implemented in its Draft PR; verify the live PR and
+current `main` HEAD before assuming integration. After D-22, the
+remaining tasks below are ordered by prerequisite value; no new
 milestone should begin without its data/decision dependency.
 
-1. **D-22 — malformed evaluation data handling.** Validate prediction and
-   ground-truth structures so malformed files produce clean CLI errors
-   (exit 2), never tracebacks.
-2. **Relevant P3 audit items.** Revalidate and prioritize
+1. **Relevant P3 audit items.** Revalidate and prioritize
    export/data-integrity defects (e.g. D-20 locale-sensitive parsing,
    D-21 CSV BOM, D-23/D-24 dataset lifecycle) ahead of speculative
    features.
-3. **M4B Phase 2 — real-document evaluation.** Collect 10–20
+2. **M4B Phase 2 — real-document evaluation.** Collect 10–20
    privacy-cleared documents (Vietnamese receipts, invoice-style pages,
    ruled-table pages), annotate by hand, onboard with
    `documind-dataset`, predict, and evaluate with `provenance: real`.
    Publish the first honest accuracy report. Data collection may proceed
-   in parallel with tasks 1–2.
-4. **Vietnamese OCR benchmarking.** Compare `lang="vi"` vs `lang="en"` on
+   in parallel with task 1.
+3. **Vietnamese OCR benchmarking.** Compare `lang="vi"` vs `lang="en"` on
    the real evaluation set; record a model-selection decision before
    tuning.
-5. **M3B — borderless table recognition.** Deferred until ruled-table
+4. **M3B — borderless table recognition.** Deferred until ruled-table
    evidence and real-document evaluation are established.
 
 ## Historical context
@@ -196,9 +198,10 @@ removed. Git history retains the old plans if needed.
 1. Inspect Git: `git status --short`, `git branch --show-current`,
    `git fetch origin`, `git rev-parse origin/main`.
 2. Read `AGENTS.md` and `HANDOFF.md` before editing.
-3. Check live Git for D-16: its extraction fix is implemented in PR #15;
-   do not reimplement it. After D-16 integration, D-22 is the next
-   prioritized engineering defect.
+3. Check live Git: D-16 is integrated on `main` (PR #15); do not
+   reimplement it. D-22's input validation is implemented in its Draft
+   PR; check live status. After D-22 integration, relevant P3 audit
+   items are next.
 4. Base new work on the latest verified `origin/main`, not a stale local
    `main`; prefer a dedicated worktree.
 5. Create a focused branch (`feat/<milestone>-<slug>` or `docs/<slug>`).

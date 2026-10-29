@@ -13,6 +13,13 @@ import json
 import re
 from pathlib import Path
 
+from .validation import (
+    require_list,
+    require_list_of_lists,
+    require_non_negative_int,
+    require_object_list,
+)
+
 WHITESPACE_RE = re.compile(r"\s+")
 
 
@@ -32,7 +39,7 @@ def _predicted_matrix(table: dict, rows: int, columns: int,
     """
     matrix: list[list[str | None]] = [[None] * columns for _ in range(rows)]
     unexpected = 0
-    for cell in table.get("cells", []):
+    for cell in table.get("cells") or []:
         row_index = cell.get("row_index")
         column_index = cell.get("column_index")
         # bool is a subclass of int; "true"/"false" indices are not
@@ -63,7 +70,7 @@ def _predicted_matrix(table: dict, rows: int, columns: int,
 
 
 def _compare_table(expected: dict, predicted: dict) -> dict:
-    rows, columns = int(expected["rows"]), int(expected["columns"])
+    rows, columns = expected["rows"], expected["columns"]
     issues: list[str] = []
     predicted_matrix, unexpected = _predicted_matrix(predicted, rows, columns, issues)
     expected_cells = expected.get("cells") or []
@@ -146,6 +153,31 @@ def _compare_table(expected: dict, predicted: dict) -> dict:
     }
 
 
+def _validate_tables(tables: list, *, role: str, path: Path,
+                     truth: bool) -> None:
+    """Validate every table, including ones that are not compared by index."""
+    for index, table in enumerate(tables):
+        field = f"tables[{index}]"
+        if not isinstance(table, dict):
+            raise ValueError(f"{role} '{field}' must be an object: {path}")
+        for dimension in ("rows", "columns"):
+            require_non_negative_int(
+                table.get(dimension), role=role,
+                field=f"{field}.{dimension}", path=path,
+            )
+        cells = table.get("cells")
+        if truth:
+            require_list_of_lists(
+                cells, role=role, field=f"{field}.cells", path=path,
+                allow_none=True,
+            )
+        else:
+            require_object_list(
+                cells, role=role, field=f"{field}.cells", path=path,
+                allow_none=True,
+            )
+
+
 def evaluate_document(prediction_path: Path, ground_truth_path: Path) -> dict:
     ground_truth = json.loads(ground_truth_path.read_text(encoding="utf-8"))
     if not isinstance(ground_truth, dict) or "tables" not in ground_truth:
@@ -154,8 +186,18 @@ def evaluate_document(prediction_path: Path, ground_truth_path: Path) -> dict:
     if not isinstance(prediction, dict) or "tables" not in prediction:
         raise ValueError(f"Table prediction needs 'tables': {prediction_path}")
 
-    expected_tables = ground_truth["tables"] or []
-    predicted_tables = prediction["tables"] or []
+    expected_tables = require_list(
+        ground_truth["tables"], role="Table ground truth", field="tables",
+        path=ground_truth_path, allow_none=True,
+    )
+    predicted_tables = require_list(
+        prediction["tables"], role="Table prediction", field="tables",
+        path=prediction_path, allow_none=True,
+    )
+    _validate_tables(expected_tables, role="Table ground truth",
+                     path=ground_truth_path, truth=True)
+    _validate_tables(predicted_tables, role="Table prediction",
+                     path=prediction_path, truth=False)
     pair_count = min(len(expected_tables), len(predicted_tables))
 
     comparisons = [
@@ -170,7 +212,7 @@ def evaluate_document(prediction_path: Path, ground_truth_path: Path) -> dict:
     # of a missed expected table is an unmatched (missing) cell, and an
     # unpredicted extra table contributes its cells as extra.
     def _cell_totals(table: dict) -> tuple[int, int, int]:
-        rows, columns = int(table["rows"]), int(table["columns"])
+        rows, columns = table["rows"], table["columns"]
         non_empty = sum(
             1
             for row in table.get("cells") or []
