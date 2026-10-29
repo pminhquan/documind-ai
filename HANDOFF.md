@@ -2,13 +2,15 @@
 
 **Date:** 2026-10-27
 
-**Verified main:** `130f32207e316330cba15d31c23558c6a2987607` (merge commit of PR #13)
+**Dated main checkpoints:** `130f32207e316330cba15d31c23558c6a2987607` (PR #13 merge, post-D18) and `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge; PR #15 base — does not contain D-16). Inspect live `origin/main` for the current HEAD.
 
 **Project state:** M0/M1, M2, M3A, M4A, M4B Phase 1, M5A, M5B (including D-18), M5C extraction rules, and M5D synthetic performance baseline are complete and integrated on `main`. M4B Phase 2 remains pending real labeled data.
 
 **Dated release checkpoint:** at the post-D18 release checkpoint, main SHA `130f322` had **392 passing pytest tests**; CI run [40439790177](https://github.com/pminhquan/documind-ai/actions/runs/40439790177) completed successfully. This is a historical verified snapshot, not a promise that future HEADs always have 392 tests.
 
-> For a new agent: read this file together with `AGENTS.md`, then inspect Git and the code. Do not use a stale local `main` as the base; fetch and branch from `origin/main`. This document describes the state after PR #13; if HEAD has moved, `git log` and CI are authoritative.
+**D-16 / PR #15:** the short-receipt line-item extraction fix is implemented in PR #15 on base `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge). That base does **not** contain D-16. Check the live PR and current `origin/main` HEAD to determine integration status; after integration, D-22 is the next prioritized engineering defect.
+
+> For a new agent: read this file together with `AGENTS.md`, then inspect Git and the code. Do not use a stale local `main` as the base; fetch and branch from `origin/main`. This document covers the post-D18 state, the PR #14 integration base, and the D-16/PR #15 work; if HEAD has moved, `git log` and CI are authoritative.
 
 ---
 
@@ -300,7 +302,7 @@ At the post-D18 release checkpoint (2026-10-27), main SHA `130f32207e316330cba15
 | **Batch UI shows the last document** | There is no full batch navigator in the results panel |
 | **CSV UTF-8 without BOM** | Excel on Windows may display Vietnamese text incorrectly (D-21) |
 | **Long single-export filenames** | A very long stem can lose its extension at the 100-character download-header cap; batch ZIP is safe |
-| **Remaining audit defects** | D-16 has a Draft PR in review (not merged; `main` still uses the fixed 3-line skip), D-22 (malformed eval inputs), plus other P3 items; revalidate against current code before starting |
+| **Remaining audit defects** | D-16's extraction fix is implemented in PR #15 (check the live PR and current `main` HEAD for integration status); D-22 (malformed eval inputs) and other P3 items remain; revalidate against current code before starting |
 | **Local-only** | 127.0.0.1, no CORS, no auth; do not expose |
 
 ---
@@ -320,7 +322,7 @@ At the post-D18 release checkpoint (2026-10-27), main SHA `130f32207e316330cba15
 | **M5D** | ✅ Done | Synthetic/local performance baseline (`reports/benchmark-local.md`) |
 | **Post-audit fixes** | ✅ Integrated | P1/P2 audit regressions; D-17 export 422 contract; D-19 stable source labels; XLSX worksheet-title hardening |
 | **M4B Phase 2** | 🔲 Pending | Needs privacy-cleared, manually annotated real documents |
-| **D-16** | 🟡 Draft PR (not merged) | Short-receipt line-item extraction implemented, tested, and specified in a Draft PR; `main` behavior unchanged until review/merge |
+| **D-16** | 🟡 Implemented in PR #15 | Short-receipt line-item extraction implemented, tested, and specified; check the live PR and current `main` HEAD for integration status |
 | **D-22** | 🔲 Pending | Malformed evaluation-input handling |
 | **M3B** | 🔲 Deferred | Borderless table recognition (model-based) |
 
@@ -400,20 +402,19 @@ Documentation changes must still keep `python scripts/verify.py` green.
 11. **Long single-export filename:** the 100-character download-header cap can truncate the stem and lose the extension; prefer batch ZIP for long names until fixed.
 12. **CSV BOM (D-21):** UTF-8 without BOM; import explicitly in Excel on Windows.
 13. **Browser smoke ≠ accuracy:** mocked inference in Chromium proves UI wiring only.
-14. **Open defects:** D-16 has a Draft PR in review and remains pending on `main`; D-22 and other P3 audit items remain open. Do not mark any of them fixed on `main` without tests and a merge.
+14. **Open defects:** D-16's extraction fix is implemented in PR #15; check the live PR and current `main` HEAD to determine integration status. D-22 and other P3 audit items remain open. Do not mark any of them fixed on `main` without tests and a merge.
 
 ---
 
 ## 11. Next Engineering Work
 
-Actual remaining backlog, in recommended order:
+D-16's extraction fix is implemented in PR #15; verify the live PR and current `origin/main` HEAD before assuming it is integrated. Once integrated, the actual remaining backlog, in recommended order:
 
-1. **D-16 — short receipt line-item extraction:** implementation is in a Draft PR (not merged); review it, confirm the spec/test evidence, then merge and update this status. `main` still drops items on ≤3-line kiosk receipts via the `start = 3` heuristic.
-2. **D-22 — malformed evaluation data handling:** structural validation so malformed prediction/ground-truth files produce clean CLI errors (exit 2), not tracebacks.
-3. **Relevant P3 audit items:** revalidate the 2026-10-26 audit against current code; prioritize export/UX/data-integrity items (e.g. D-20 locale-sensitive dates, D-21 CSV BOM, D-23/D-24 dataset lifecycle) over speculative features.
-4. **M4B Phase 2 — real-document evaluation:** collect privacy-cleared, manually annotated documents (10–20 pilot: Vietnamese receipts, invoice-style pages, ruled-table pages), onboard via `documind-dataset`, evaluate with provenance `real`, and publish the first honest accuracy report. Data collection/annotation can proceed in parallel with 1–3 when data becomes available.
-5. **Vietnamese OCR model/language benchmarking:** compare `lang="vi"` vs `lang="en"` on the real set after M4B Phase 2 evidence; record a model-selection decision before tuning.
-6. **M3B — borderless tables:** deferred; requires a model-based structure recognizer and should follow real-data evidence.
+1. **D-22 — malformed evaluation data handling:** structural validation so malformed prediction/ground-truth files produce clean CLI errors (exit 2), not tracebacks.
+2. **Relevant P3 audit items:** revalidate the 2026-10-26 audit against current code; prioritize export/UX/data-integrity items (e.g. D-20 locale-sensitive dates, D-21 CSV BOM, D-23/D-24 dataset lifecycle) over speculative features.
+3. **M4B Phase 2 — real-document evaluation:** collect privacy-cleared, manually annotated documents (10–20 pilot: Vietnamese receipts, invoice-style pages, ruled-table pages), onboard via `documind-dataset`, evaluate with provenance `real`, and publish the first honest accuracy report. Data collection/annotation can proceed in parallel with tasks 1–2 when data becomes available.
+4. **Vietnamese OCR model/language benchmarking:** compare `lang="vi"` vs `lang="en"` on the real set after M4B Phase 2 evidence; record a model-selection decision before tuning.
+5. **M3B — borderless tables:** deferred; requires a model-based structure recognizer and should follow real-data evidence.
 
 Do not start a new milestone before its prerequisite data/decision exists. Do not present mock/synthetic results as accuracy.
 
@@ -421,7 +422,8 @@ Do not start a new milestone before its prerequisite data/decision exists. Do no
 
 ## 12. Git State and Agent Workflow
 
-- **Verified integration base:** `origin/main` @ `130f32207e316330cba15d31c23558c6a2987607` (PR #13 merged on 2026-10-27; merge commit; three D-18 commits reachable).
+- **Post-D18 release checkpoint (historical):** `origin/main` @ `130f32207e316330cba15d31c23558c6a2987607` (PR #13 merged on 2026-10-27; merge commit; three D-18 commits reachable).
+- **PR #15 base:** `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge). That base does **not** contain D-16; the extraction fix is implemented in PR #15 on `feat/d16-short-receipt-items`. Check the live PR and current `origin/main` before assuming integration.
 - **PR #13:** merged; the `fix/m5b-pdf-page-level-exports` branch is retained (not deleted).
 - At the release checkpoint there were **no open feature PRs**. Inspect `gh pr list` / `git log origin/main` before starting: history may have moved since this document was written.
 - **Branch naming:** `feat/<milestone>-<slug>` for features, `docs/<slug>` for documentation; create focused commits; never force-push; PRs target `main` and stay Draft/open until the owner authorizes merge.
@@ -445,4 +447,4 @@ This architecture keeps everything testable, reproducible, and debuggable. The p
 
 ---
 
-*End of handoff. Checkpoint: main `130f322` (PR #13 merged), 392 tests passing on the exact SHA and CI green on 2026-10-27. Verify current HEAD and CI before acting; this document is not a substitute for Git.*
+*End of handoff. Checkpoint: main `130f322` (PR #13 merged), 392 tests passing on the exact SHA and CI green on 2026-10-27. D-16's extraction fix is implemented in PR #15 (base `31a8f1b`, PR #14) and is not part of the `130f322` checkpoint; verify current HEAD and CI before acting. This document is not a substitute for Git.*

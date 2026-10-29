@@ -183,7 +183,10 @@ join that item's description, and a standalone currency token between
 the description and amount can appear in a description (both pre-
 existing behavior, unchanged by D-16); a tax identifier printed as a
 bare `VAT:` number without an `ID`/`code` qualifier is still read as a
-monetary tax (pre-existing); a Vietnamese address without a
+monetary tax and treated as a summary boundary (pre-existing); a VAT
+token on a metadata row such as `HÓA ĐƠN VAT: 000123` is also still
+read as a monetary tax by the summary pass (pre-existing), but that
+metadata row never ends the item region; a Vietnamese address without a
 postal code or an administrative comma component is not recognized;
 metadata recognition is pattern-based, so an unlabelled identifier that
 matches none of the listed shapes can still receive candidate
