@@ -11,14 +11,18 @@ extraction, ruled-table recognition, an evaluation framework, real-document
 dataset onboarding, and a local FastAPI + vanilla JavaScript web app with
 PDF input, batch processing, and human-in-the-loop corrections.
 
-**Current status (post-D18 release checkpoint):** M0/M1 OCR baseline, M2
-invoice extraction, M3A ruled tables, M4A evaluation, M4B Phase 1 dataset
-onboarding, M5A web app, M5B PDF/batch/page-level exports (D-18), M5C
-Vietnamese extraction rules, and M5D synthetic performance baseline are
-implemented and integrated on `main` (PR #13, main
-`130f32207e316330cba15d31c23558c6a2987607`). Real-document accuracy
-evaluation is **pending** privacy-cleared, manually annotated data.
-There is no LLM, no model training, and no database.
+**Current status:** M0/M1 OCR baseline, M2 invoice extraction, M3A ruled
+tables, M4A evaluation, M4B Phase 1 dataset onboarding, M5A web app, M5B
+PDF/batch/page-level exports (D-18), M5C Vietnamese extraction rules,
+and M5D synthetic performance baseline are implemented and integrated on
+`main` (post-D18 checkpoint: PR #13,
+`130f32207e316330cba15d31c23558c6a2987607`). D-16's short-receipt
+line-item recovery is implemented in PR #15 (base checkpoint
+`31a8f1b`, PR #14 merge; that base does not contain D-16); check the
+live PR and current `main` HEAD for integration status.
+Real-document accuracy evaluation is **pending** privacy-cleared,
+manually annotated data. There is no LLM, no model training, and no
+database.
 
 The CLI tools operate on images and saved artifacts. PDFs are supported
 through the local web API, which renders pages and returns page-indexed
@@ -32,6 +36,13 @@ results.
   `pypdfium2`; page-indexed results).
 - OCR, invoice extraction, ruled-table recognition, and an Auto workflow
   that reuses a single OCR pass.
+- Short headerless receipt extraction (D-16; source revision: PR #15 —
+  check the live PR and current `main` HEAD for integration status):
+  content-aware line-item region selection without a table header,
+  merged OCR rows such as `COFFEE 25.000`, metadata/tax-identifier
+  exclusion, and payment/summary boundaries that close the item region.
+  Heuristic only: real-world OCR accuracy for these layouts remains
+  unvalidated.
 - Editable invoice fields and table cells with corrections kept separate
   from machine output; corrections are isolated per document and page,
   survive page switches, and reset per page/family.
@@ -57,8 +68,7 @@ results.
 ### Not yet implemented
 
 - Genuine OCR accuracy evaluation on real documents (M4B Phase 2).
-- Short-receipt line-item recovery (D-16) and malformed evaluation-input
-  hardening (D-22).
+- Malformed evaluation-input hardening (D-22).
 - Borderless table recognition (M3B, deferred).
 - Vietnamese OCR model/language benchmarking on real data.
 - Database, job queue/resume, or multi-user deployment (not planned for
@@ -396,9 +406,15 @@ reports/             evaluation results, benchmark, audits (m3a, m4a,
   (`"."`, `".."`) can produce odd (non-traversing) ZIP entry names;
   extractors drop them and the UI cannot generate them.
 - Local-only, no CORS, no authentication; do not expose the server.
-- Remaining P3 audit items (D-16, D-22, and other small defects) are
-  tracked in [HANDOFF.md](HANDOFF.md) and the
-  [baseline audit](reports/audits/2026-10-26-baseline-audit.md).
+- Headerless receipt recovery is heuristic: metadata classification is
+  pattern-based, a first item's description above its amount is not
+  reconstructed, merged bare integers stay ambiguous, and a VAT token on
+  a metadata row can still be read as a monetary tax. Real-world OCR
+  accuracy for these layouts is unvalidated.
+- Remaining P3 audit items (D-22 and other small defects) are tracked in
+  [HANDOFF.md](HANDOFF.md) and the [baseline audit](reports/audits/2026-10-26-baseline-audit.md).
+  D-16's extraction fix is implemented in PR #15; check the live PR and
+  current `main` HEAD for integration status.
 
 ## Roadmap
 
@@ -415,8 +431,10 @@ reports/             evaluation results, benchmark, audits (m3a, m4a,
 - ~~**M5C:** Vietnamese extraction rules (labels, VND money formats)~~ ✓
   — OCR recognition accuracy not validated
 - ~~**M5D:** synthetic/local performance baseline and benchmark tooling~~ ✓
-- **D-16:** short-receipt line-item extraction (pending)
-- **D-22:** malformed evaluation-input handling (pending)
+- **D-16:** short-receipt line-item extraction — implemented in PR #15;
+  check the live PR and current `main` HEAD for integration status
+- **D-22:** malformed evaluation-input handling (pending; next
+  prioritized engineering defect after D-16 integration)
 - **Remaining P3 audit items** (pending, prioritized in HANDOFF)
 - **M4B Phase 2:** evaluate on privacy-cleared, manually annotated real
   documents (pending data)

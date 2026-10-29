@@ -76,3 +76,27 @@ class TestExtractCliHappyPath:
         captured = capsys.readouterr()
         assert "status=ok" in captured.out
         assert "line_items=3" in captured.out
+
+    def test_short_headerless_receipt_writes_item(self, tmp_path):
+        ocr_path = tmp_path / "short.json"
+        ocr_path.write_text(
+            json.dumps({"items": [
+                {"text": "COFFEE 25.000", "box": [
+                    [0, 0], [160, 0], [160, 20], [0, 20]]},
+                {"text": "TOTAL 25.000", "box": [
+                    [0, 30], [160, 30], [160, 50], [0, 50]]},
+            ]}),
+            encoding="utf-8",
+        )
+        output = tmp_path / "invoice.json"
+        code = extract_cli.main([str(ocr_path), "-o", str(output)])
+        assert code == 0
+        data = json.loads(output.read_text(encoding="utf-8"))
+        invoice = data["invoice"]
+        assert [
+            (item["description"], item["line_total"])
+            for item in invoice["line_items"]
+        ] == [("COFFEE", "25000")]
+        assert invoice["total"] == "25000"
+        assert invoice["validation_status"] == "review_required"
+        assert data["provenance"]["line_items[0].line_total"]["ocr_index"] == 0

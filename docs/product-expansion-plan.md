@@ -6,12 +6,24 @@ resume after context loss. Historical planning is kept in
 [Historical context](#historical-context) and must not be read as current
 work.
 
-**Last verified checkpoint:** `main` @
+**Post-D18 release checkpoint (historical):** `main` @
 `130f32207e316330cba15d31c23558c6a2987607` (merge commit of PR #13,
 2026-10-27). Main CI: [run 40439790177](https://github.com/pminhquan/documind-ai/actions/runs/40439790177)
 — success, ruff clean, frontend gate green, 392 tests passing at that
-dated release checkpoint. Future HEADs may have a different test count;
-check CI.
+dated checkpoint. Future HEADs may have a different test count; check
+CI.
+
+**PR #15 base checkpoint:** `origin/main` @
+`31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge, 2026-10-27;
+does not contain D-16). Check live `origin/main`/CI for the current
+HEAD.
+
+**D-16 / PR #15:** the short-receipt line-item extraction fix is
+implemented in PR #15 on base
+`31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge), which does
+**not** contain D-16. Check the live PR and current `main` HEAD for
+integration status; after integration, D-22 is the next prioritized
+engineering defect.
 
 **Ground rules:** quality over quantity; no invented benchmarks or
 accuracy claims; real-document evaluation stays pending until
@@ -34,7 +46,7 @@ deployment in the current scope.
 | M5C — Vietnamese extraction rules | ✅ Complete (extraction layer) | Labels + VND money rules; **OCR recognition not validated** |
 | M5D — performance baseline | ✅ Complete (synthetic/local) | `reports/benchmark-local.md`; runtime numbers, not accuracy |
 | Post-audit regression fixes | ✅ Integrated | P1/P2 audit fixes, D-17, D-19, XLSX title safety |
-| D-16 — short-receipt line items | 🔲 Pending | Next priority; needs a letterhead/header redesign |
+| D-16 — short-receipt line items | 🟡 Implemented in PR #15 | Headerless region selection implemented, tested, and specified; check the live PR and current `main` HEAD for integration status |
 | D-22 — malformed eval inputs | 🔲 Pending | Structural validation for prediction/ground-truth data |
 | M4B Phase 2 — real-document evaluation | 🔲 Pending | Blocked on privacy-cleared, manually annotated data |
 | M3B — borderless tables | 🔲 Deferred | Model-based structure recognition; later milestone |
@@ -112,33 +124,35 @@ synthetic input, not recognition-accuracy results.
 - All automated tests use mocked/synthetic/geometry-only inputs; the
   benchmark and historical smoke tests are not real-world accuracy
   evidence. M4B Phase 2 is the only path to genuine metrics.
-- Open defects include D-16, D-22, and other P3 audit items; revalidate
-  the audit against current code before starting them.
+- Open defects include D-22 and other P3 audit items; revalidate the
+  audit against current code before starting them. D-16's extraction fix
+  is implemented in PR #15; check the live PR and current `main` HEAD
+  for integration status.
 
 ## Next tasks
 
-Ordered by prerequisite value; no new milestone should begin without its
-data/decision dependency.
+D-16's extraction fix is implemented in PR #15; verify the live PR and
+current `main` HEAD before assuming it is integrated. Once integrated,
+the remaining tasks below are ordered by prerequisite value; no new
+milestone should begin without its data/decision dependency.
 
-1. **D-16 — short-receipt line-item extraction.** Recover items on ≤3-line
-   kiosk receipts without dropping the whole item region.
-2. **D-22 — malformed evaluation data handling.** Validate prediction and
+1. **D-22 — malformed evaluation data handling.** Validate prediction and
    ground-truth structures so malformed files produce clean CLI errors
    (exit 2), never tracebacks.
-3. **Relevant P3 audit items.** Revalidate and prioritize
+2. **Relevant P3 audit items.** Revalidate and prioritize
    export/data-integrity defects (e.g. D-20 locale-sensitive parsing,
    D-21 CSV BOM, D-23/D-24 dataset lifecycle) ahead of speculative
    features.
-4. **M4B Phase 2 — real-document evaluation.** Collect 10–20
+3. **M4B Phase 2 — real-document evaluation.** Collect 10–20
    privacy-cleared documents (Vietnamese receipts, invoice-style pages,
    ruled-table pages), annotate by hand, onboard with
    `documind-dataset`, predict, and evaluate with `provenance: real`.
    Publish the first honest accuracy report. Data collection may proceed
-   in parallel with tasks 1–3.
-5. **Vietnamese OCR benchmarking.** Compare `lang="vi"` vs `lang="en"` on
+   in parallel with tasks 1–2.
+4. **Vietnamese OCR benchmarking.** Compare `lang="vi"` vs `lang="en"` on
    the real evaluation set; record a model-selection decision before
    tuning.
-6. **M3B — borderless table recognition.** Deferred until ruled-table
+5. **M3B — borderless table recognition.** Deferred until ruled-table
    evidence and real-document evaluation are established.
 
 ## Historical context
@@ -182,12 +196,15 @@ removed. Git history retains the old plans if needed.
 1. Inspect Git: `git status --short`, `git branch --show-current`,
    `git fetch origin`, `git rev-parse origin/main`.
 2. Read `AGENTS.md` and `HANDOFF.md` before editing.
-3. Base new work on the latest verified `origin/main`, not a stale local
+3. Check live Git for D-16: its extraction fix is implemented in PR #15;
+   do not reimplement it. After D-16 integration, D-22 is the next
+   prioritized engineering defect.
+4. Base new work on the latest verified `origin/main`, not a stale local
    `main`; prefer a dedicated worktree.
-4. Create a focused branch (`feat/<milestone>-<slug>` or `docs/<slug>`).
-5. Run `python scripts/verify.py` before committing/pushing.
-6. Open a Draft PR with the verified checkpoint and test evidence; do not
+5. Create a focused branch (`feat/<milestone>-<slug>` or `docs/<slug>`).
+6. Run `python scripts/verify.py` before committing/pushing.
+7. Open a Draft PR with the verified checkpoint and test evidence; do not
    merge without explicit owner authorization; never force-push or
    rewrite history.
-7. Update README/HANDOFF/this plan when milestone state changes. Use a
+8. Update README/HANDOFF/this plan when milestone state changes. Use a
    dated checkpoint for test counts; do not assert a permanent total.
