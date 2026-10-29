@@ -23,6 +23,8 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from .validation import require_object, require_object_list
+
 SCALAR_FIELDS = (
     "supplier", "invoice_number", "invoice_date", "currency",
     "subtotal", "tax", "discount", "total", "payment_amount", "change_amount",
@@ -251,6 +253,20 @@ class InvoiceDocumentResult:
     accuracy: float | None = None
 
 
+def _validated_invoice(document: dict, *, role: str,
+                       path: Path) -> tuple[dict, list]:
+    """Validate the nested invoice object and return it with its items."""
+    invoice = require_object(
+        document["invoice"], role=role, field="invoice", path=path,
+        allow_none=True,
+    )
+    items = require_object_list(
+        invoice.get("line_items"), role=role, field="invoice.line_items",
+        path=path, allow_none=True,
+    )
+    return invoice, items
+
+
 def evaluate_document(prediction_path: Path, ground_truth_path: Path) -> dict:
     ground_truth = json.loads(ground_truth_path.read_text(encoding="utf-8"))
     if not isinstance(ground_truth, dict) or "invoice" not in ground_truth:
@@ -259,8 +275,12 @@ def evaluate_document(prediction_path: Path, ground_truth_path: Path) -> dict:
     if not isinstance(prediction, dict) or "invoice" not in prediction:
         raise ValueError(f"Invoice prediction needs 'invoice': {prediction_path}")
 
-    expected_invoice = ground_truth["invoice"] or {}
-    predicted_invoice = prediction["invoice"] or {}
+    expected_invoice, expected_items = _validated_invoice(
+        ground_truth, role="Invoice ground truth", path=ground_truth_path
+    )
+    predicted_invoice, predicted_items = _validated_invoice(
+        prediction, role="Invoice prediction", path=prediction_path
+    )
 
     outcomes: dict[str, FieldOutcome] = {}
     matched = applicable = 0
@@ -276,9 +296,7 @@ def evaluate_document(prediction_path: Path, ground_truth_path: Path) -> dict:
             if outcome.status == MATCHED:
                 matched += 1
 
-    line_items = _compare_line_items(
-        expected_invoice.get("line_items"), predicted_invoice.get("line_items")
-    )
+    line_items = _compare_line_items(expected_items, predicted_items)
 
     accuracy = (matched / applicable) if applicable else None
     return {

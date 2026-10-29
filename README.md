@@ -17,12 +17,12 @@ PDF/batch/page-level exports (D-18), M5C Vietnamese extraction rules,
 and M5D synthetic performance baseline are implemented and integrated on
 `main` (post-D18 checkpoint: PR #13,
 `130f32207e316330cba15d31c23558c6a2987607`). D-16's short-receipt
-line-item recovery is implemented in PR #15 (base checkpoint
-`31a8f1b`, PR #14 merge; that base does not contain D-16); check the
-live PR and current `main` HEAD for integration status.
-Real-document accuracy evaluation is **pending** privacy-cleared,
-manually annotated data. There is no LLM, no model training, and no
-database.
+line-item recovery is merged into `main` via PR #15 (merge commit
+`231cd9`). D-22's evaluation-input validation is implemented in its
+Draft PR; check the live PR and current `main` HEAD for integration
+status. Real-document accuracy evaluation is **pending**
+privacy-cleared, manually annotated data. There is no LLM, no model
+training, and no database.
 
 The CLI tools operate on images and saved artifacts. PDFs are supported
 through the local web API, which renders pages and returns page-indexed
@@ -36,9 +36,9 @@ results.
   `pypdfium2`; page-indexed results).
 - OCR, invoice extraction, ruled-table recognition, and an Auto workflow
   that reuses a single OCR pass.
-- Short headerless receipt extraction (D-16; source revision: PR #15 —
-  check the live PR and current `main` HEAD for integration status):
-  content-aware line-item region selection without a table header,
+- Short headerless receipt extraction (D-16; merged via PR #15, merge
+  commit `231cd9`): content-aware line-item region selection without a
+  table header,
   merged OCR rows such as `COFFEE 25.000`, metadata/tax-identifier
   exclusion, and payment/summary boundaries that close the item region.
   Heuristic only: real-world OCR accuracy for these layouts remains
@@ -57,6 +57,10 @@ results.
   `documind-eval`, `documind-dataset`.
 - Evaluation framework (CER/WER, invoice field accuracy, strict table
   agreement) and synthetic evaluation reports.
+- Evaluation input validation (D-22; source revision: Draft PR — check
+  the live PR and current `main` HEAD for integration status): malformed
+  prediction/ground-truth containers fail with exit code 2 and
+  `Evaluation error:`, without tracebacks or partial metrics.
 - Vietnamese invoice label and money rules at the extraction layer
   (diacritic-insensitive matching, VND symbols).
 - Reproducible local performance benchmark tooling
@@ -68,7 +72,6 @@ results.
 ### Not yet implemented
 
 - Genuine OCR accuracy evaluation on real documents (M4B Phase 2).
-- Malformed evaluation-input hardening (D-22).
 - Borderless table recognition (M3B, deferred).
 - Vietnamese OCR model/language benchmarking on real data.
 - Database, job queue/resume, or multi-user deployment (not planned for
@@ -411,10 +414,10 @@ reports/             evaluation results, benchmark, audits (m3a, m4a,
   reconstructed, merged bare integers stay ambiguous, and a VAT token on
   a metadata row can still be read as a monetary tax. Real-world OCR
   accuracy for these layouts is unvalidated.
-- Remaining P3 audit items (D-22 and other small defects) are tracked in
+- Remaining P3 audit items (other small defects) are tracked in
   [HANDOFF.md](HANDOFF.md) and the [baseline audit](reports/audits/2026-10-26-baseline-audit.md).
-  D-16's extraction fix is implemented in PR #15; check the live PR and
-  current `main` HEAD for integration status.
+  D-22's evaluation-input validation is implemented in its Draft PR;
+  check the live PR and current `main` HEAD for integration status.
 
 ## Roadmap
 
@@ -431,11 +434,13 @@ reports/             evaluation results, benchmark, audits (m3a, m4a,
 - ~~**M5C:** Vietnamese extraction rules (labels, VND money formats)~~ ✓
   — OCR recognition accuracy not validated
 - ~~**M5D:** synthetic/local performance baseline and benchmark tooling~~ ✓
-- **D-16:** short-receipt line-item extraction — implemented in PR #15;
-  check the live PR and current `main` HEAD for integration status
-- **D-22:** malformed evaluation-input handling (pending; next
-  prioritized engineering defect after D-16 integration)
-- **Remaining P3 audit items** (pending, prioritized in HANDOFF)
+- ~~**D-16:** short-receipt line-item extraction~~ — merged via PR #15
+  (merge commit `231cd9`)
+- **D-22:** malformed evaluation-input handling — implemented in its
+  Draft PR; check the live PR and current `main` HEAD for integration
+  status
+- **Remaining P3 audit items** (pending, prioritized in HANDOFF; next
+  engineering task after D-22 integration)
 - **M4B Phase 2:** evaluate on privacy-cleared, manually annotated real
   documents (pending data)
 - **Vietnamese OCR benchmarking:** compare `lang="vi"` vs `lang="en"` on

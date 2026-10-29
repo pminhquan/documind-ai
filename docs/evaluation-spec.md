@@ -42,6 +42,40 @@ only the manifest author declares `synthetic` or `real`. Reports render
 a provenance-specific caveat line (unknown → "do not treat these
 numbers as real-world accuracy").
 
+## Structural validation (D-22)
+
+Nested payload shapes are validated before scoring, for both predictions
+and ground truth. Errors identify the role (`prediction` / `ground
+truth`), the field path and the source file; they never echo document
+contents or cell text.
+
+- Top-level files must be JSON objects with the task key. Invoice and
+  table containers follow the rules below; OCR text values are
+  stringified as before.
+- **Invoice:** `invoice` must be an object or `null`; `line_items` must
+  be a list or `null`/omitted, and every entry must be an object. A
+  `null` container keeps its legacy meaning "empty"; a present non-null
+  container of another type is a structural error.
+- **Table:** `tables` must be a list or `null`/omitted, and every entry
+  must be an object. `rows` and `columns` must be genuine non-negative
+  integers on both sides — booleans, strings, floats, `null`, negative
+  values and missing keys are rejected. Ground-truth `cells` must be a
+  list of row lists (or `null`/omitted); predicted `cells` must be a
+  list of cell objects (or `null`/omitted).
+- Predicted cell objects are validated as objects, but their
+  **coordinates are not structurally validated**. Non-integer, boolean,
+  out-of-shape and duplicate coordinates keep the documented scoring
+  rule and count as unexpected predicted cells (Task 3).
+- Invoice scalar values may be `null`. Unparseable or non-finite money
+  values remain "incorrect" scores, not structural errors.
+- Validation happens before scoring. The first malformed document aborts
+  the whole run: `documind-eval` prints
+  `Evaluation error: <message>` to stderr, exits with code `2`, writes
+  no `summary.json`/`report.md`, and leaves files from earlier runs
+  untouched. A partially evaluated aggregate is never published.
+- Metric definitions, denominators, null semantics and strict matching
+  are unchanged by validation.
+
 ## Task 1 — OCR (CER / WER)
 
 - Prediction: `documind-ocr` JSON (`full_text`).
@@ -151,6 +185,9 @@ truth live in `data/eval/synthetic/` and reproduce
   metric change).
 - WER tokenization is plain whitespace splitting (no punctuation
   normalization beyond NFKC/casefold).
+- Structural validation covers invoice/table containers only; scalar
+  invoice values are compared as before, and predicted-cell coordinates
+  remain scored rather than rejected.
 - All current labeled data is synthetic; **no real-world accuracy is
   claimed anywhere in this repository** (real-data evaluation pending
   licensed data).
