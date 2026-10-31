@@ -108,3 +108,86 @@ class TestAssignment:
         cells, warnings = assign_ocr_to_cells(make_grid(), [payload])
         assert cells[0].text == "EDGE"
         assert warnings == []
+
+
+class TestTinyLeadingTokenTolerance:
+    """D-34: the visual-line tolerance anchored on the FIRST token's
+    height, so a tiny leading token (punctuation-height) shrank the
+    tolerance and split otherwise aligned tokens into separate lines,
+    reordering the reading sequence."""
+
+    @staticmethod
+    def tiny(text, cx, cy):
+        return {"text": text, "box": [[cx - 2, cy - 1], [cx + 2, cy - 1],
+                                      [cx + 2, cy + 1], [cx - 2, cy + 1]]}
+
+    def test_tiny_leading_token_does_not_split_aligned_tokens(self):
+        # A comma-height token (h=2, cy=4) leads the line; A and B
+        # (h=6, cy=5/6) sit within one visual line of it. First-token
+        # anchoring gave a 1 px tolerance and pushed B to a second line,
+        # so B jumped behind the comma in reading order.
+        items = [self.tiny(",", 18, 4), item("A", 11, 5), item("B", 14, 6)]
+        cells, _ = assign_ocr_to_cells(make_grid(), items)
+        assert cells[1].text == "A B ,"
+        assert cells[1].source_ocr_indices == [1, 2, 0]
+
+
+class TestTallTokenAdversarial:
+    """Review pass on the D-34 fix: the tallest-token anchor must not
+    merge genuinely separate neighboring rows when one region is
+    unusually tall. Separation is only observable through reading order
+    (cell text joins lines with spaces), so each test uses a cx ordering
+    that reverses across the line boundary."""
+
+    @staticmethod
+    def grid():
+        return GridGeometry(row_edges=[0, 30, 60], col_edges=[0, 30, 60])
+
+    @staticmethod
+    def item(text, cx, cy, h):
+        return {"text": text, "box": [[cx - 5, cy - h // 2], [cx + 5, cy - h // 2],
+                                      [cx + 5, cy + h // 2], [cx - 5, cy + h // 2]]}
+
+    def _cell(self, items):
+        cells, _ = assign_ocr_to_cells(self.grid(), items)
+        return cells[1]
+
+    def test_normal_rows_beyond_tolerance_stay_separate(self):
+        # A(cy=4, cx=45) line 1; B(cy=9, cx=31), C(cy=10, cx=38) line 2.
+        # Diff 5 > 0.5 * 6: separate -> "A B C". A false merge of all
+        # three would order by x: "B C A".
+        items = [self.item("A", 45, 4, 6), self.item("B", 31, 9, 6),
+                 self.item("C", 38, 10, 6)]
+        assert self._cell(items).text == "A B C"
+
+    def test_tall_token_does_not_absorb_clearly_separate_row(self):
+        # TALL(h=20, cy=10, cx=45) anchors tolerance at 10; the next row
+        # sits at cy=24/25 (center diff 14/15 > 10, vertical ranges do
+        # not overlap the tall region) -> separate lines -> "TALL B C".
+        # A false merge would order by x: "B C TALL".
+        items = [self.item("TALL", 45, 10, 20), self.item("B", 31, 24, 6),
+                 self.item("C", 38, 25, 6)]
+        assert self._cell(items).text == "TALL B C"
+
+    def test_reading_order_with_tall_token_preserved(self):
+        # One visual line mixing a tall region and normal tokens keeps
+        # x order; a later row stays after it.
+        items = [self.item("TALL", 31, 10, 20), self.item("A", 40, 12, 6),
+                 self.item("B", 50, 13, 6), self.item("Z", 35, 24, 6)]
+        assert self._cell(items).text == "TALL A B Z"
+
+    def test_overlapping_neighbor_row_merges_by_design(self):
+        # A neighbor whose vertical range overlaps the tall region's
+        # range (here 4 px of the 6 px row) is the same visual line by
+        # the project's 50%-overlap convention (mirrors extraction's
+        # layout.group_lines rule) — merged is intentional, not a
+        # false merge.
+        items = [self.item("TALL", 31, 10, 20), self.item("B", 45, 19, 6)]
+        assert self._cell(items).text == "TALL B"
+
+    def test_tiny_leading_token_same_line_kept(self):
+        # Keep the corrected D-34 behavior on the larger grid: a tiny
+        # leading comma no longer splits the tokens that follow it.
+        comma = {"text": ",", "box": [[31, 3], [33, 3], [33, 5], [31, 5]]}
+        items = [comma, self.item("A", 40, 5, 6), self.item("B", 50, 6, 6)]
+        assert self._cell(items).source_ocr_indices == [0, 1, 2]
