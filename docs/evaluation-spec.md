@@ -79,22 +79,25 @@ contents or cell text.
 - Metric definitions, denominators, null semantics and strict matching
   are unchanged by validation.
 
-**Resource allocation (D-22 follow-up; corrected 2026-10-31 review).**
-Structural validation sets **no upper cap on `rows × columns`** — and
-the declared dimensions are **not** memory-safe by themselves.
-Ground-truth `cells` must physically be a `rows × columns` matrix, so
-the ground-truth side is bounded by the file on disk; the **prediction
-side is not**: the table evaluator builds an expected-shape grid from
-the declared `rows`/`columns` (`_predicted_matrix` in
-`src/documind/evaluation/table_eval.py`), so a tiny prediction file
-declaring enormous dimensions can still trigger excessive allocation or
-memory exhaustion in `documind-eval`. This is an accepted risk for now —
-`documind-eval` is a local, single-user tool whose manifests and
-predictions are authored by the same person who runs them. **Resource
-budgeting (dimension/cell-count caps at the evaluation boundary) is
-recorded as a separate backlog item** for future evaluation work, to be
-implemented with its own tests at that boundary — not as a silent cap
-inside this specification.
+**Resource allocation (D-22 follow-up; corrected in the 2026-10-31
+integration review).** Structural validation sets **no upper cap on
+`rows × columns`**, and no dimension or cell-count limit is enforced
+anywhere in the evaluation path. The allocation risk sits on the
+**expected (ground-truth) side**: `_compare_table` reads `rows` and
+`columns` from the *expected* table and `_predicted_matrix` allocates an
+expected-shape grid from those dimensions before scoring, while D-22's
+`require_list_of_lists` only checks nested container types — so **sparse
+ground truth that declares enormous dimensions (with few or no cells)
+passes validation and can still trigger excessive allocation or memory
+exhaustion** in `documind-eval`. Prediction dimensions do not drive this
+allocation for matched tables, and an unmatched predicted table never
+runs the matrix path (missed and extra tables contribute arithmetic
+cell totals only). This is an accepted risk for now — `documind-eval`
+is a local, single-user tool whose manifests and predictions are
+authored by the same person who runs them. **Resource budgeting
+(dimension/cell-count caps at the evaluation boundary) remains an
+unresolved backlog item**, to be implemented with its own tests at that
+boundary — not as a silent cap inside this specification.
 
 ## Task 1 — OCR (CER / WER)
 
