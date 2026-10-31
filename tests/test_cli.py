@@ -1,6 +1,7 @@
 """CLI tests: help, error handling, and a mocked end-to-end run."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -127,3 +128,37 @@ class TestCliOSErrorHandling:
         exit_code = cli.main([str(sample_png), "-o", str(target)])
         assert exit_code == 1
         assert "OCR error" in capsys.readouterr().err
+
+
+class TestPreprocessingTempSafety:
+    """D-33: the temporary RGB PNG must be removed even when the
+    conversion raises a non-OSError (e.g. PIL's DecompressionBombError);
+    normal paths already cleaned up correctly."""
+
+    def test_temp_png_removed_on_non_oserror_conversion_failure(
+            self, tmp_path, monkeypatch):
+        import tempfile
+
+        from PIL import Image
+
+        import documind.ocr.preprocessing as preprocessing
+
+        source = tmp_path / "bomb.png"
+        Image.new("RGBA", (4, 4)).save(source, format="PNG")
+
+        real_open = Image.open
+        calls = {"count": 0}
+
+        def fake_open(*args, **kwargs):
+            calls["count"] += 1
+            if calls["count"] == 2:  # the conversion reopen
+                raise Image.DecompressionBombError("simulated bomb")
+            return real_open(*args, **kwargs)
+
+        monkeypatch.setattr(preprocessing.Image, "open", fake_open)
+
+        before = set(Path(tempfile.gettempdir()).glob("documind_*.png"))
+        with pytest.raises(preprocessing.PreprocessingError),                 preprocessing.prepare_image(source):
+            pass
+        after = set(Path(tempfile.gettempdir()).glob("documind_*.png"))
+        assert after == before
