@@ -108,3 +108,25 @@ class TestAssignment:
         cells, warnings = assign_ocr_to_cells(make_grid(), [payload])
         assert cells[0].text == "EDGE"
         assert warnings == []
+
+
+class TestTinyLeadingTokenTolerance:
+    """D-34: the visual-line tolerance anchored on the FIRST token's
+    height, so a tiny leading token (punctuation-height) shrank the
+    tolerance and split otherwise aligned tokens into separate lines,
+    reordering the reading sequence."""
+
+    @staticmethod
+    def tiny(text, cx, cy):
+        return {"text": text, "box": [[cx - 2, cy - 1], [cx + 2, cy - 1],
+                                      [cx + 2, cy + 1], [cx - 2, cy + 1]]}
+
+    def test_tiny_leading_token_does_not_split_aligned_tokens(self):
+        # A comma-height token (h=2, cy=4) leads the line; A and B
+        # (h=6, cy=5/6) sit within one visual line of it. First-token
+        # anchoring gave a 1 px tolerance and pushed B to a second line,
+        # so B jumped behind the comma in reading order.
+        items = [self.tiny(",", 18, 4), item("A", 11, 5), item("B", 14, 6)]
+        cells, _ = assign_ocr_to_cells(make_grid(), items)
+        assert cells[1].text == "A B ,"
+        assert cells[1].source_ocr_indices == [1, 2, 0]
