@@ -752,10 +752,15 @@ def _parse_item_line(
     amount_tokens = [token for token in line.tokens if _is_money_token(token)]
     non_amount_tokens = [token for token in line.tokens if token not in amount_tokens]
     if len(line.tokens) > 1:
+        # D-31: spans/joined cover ALL tokens. Word-level OCR regions
+        # split "SOAP 2 x 2.50 5.00" into one region per word, and the
+        # bare-integer quantity classifies as a money token — matching
+        # the qty x price pattern only against non-amount words lost
+        # quantity/unit_price on every multi-region row.
         parts: list[str] = []
         spans: list[tuple[int, int, OcrToken]] = []
         offset = 0
-        for token in non_amount_tokens:
+        for token in line.tokens:
             spans.append((offset, offset + len(token.text), token))
             parts.append(token.text)
             offset += len(token.text) + 1
@@ -813,8 +818,15 @@ def _parse_item_line(
     item = LineItem(description=description, quantity=quantity, unit_price=unit_price)
     if amount_tokens:
         total_token = amount_tokens[-1]
-        item.line_total = parse_amount(total_token.text)
-        prov["line_total"] = total_token
+        # Review (D-31): on a row without a printed total ("SOAP 2 x
+        # 2.50") the rightmost money token IS the unit price inside the
+        # qty x price pattern — mislabeling it as the line total also
+        # made the validator report a fake arithmetic mismatch. Pattern
+        # operands never count as the total, and total = qty x price is
+        # never derived: totals come from printed text only.
+        if total_token is not prov["quantity"] and total_token is not prov["unit_price"]:
+            item.line_total = parse_amount(total_token.text)
+            prov["line_total"] = total_token
     elif qty_match:
         # Merged single-token row like "SOAP 2 x 2.50 5.00": the line
         # total is the rightmost complete money token after the
