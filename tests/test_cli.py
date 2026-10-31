@@ -158,8 +158,7 @@ class TestPreprocessingTempSafety:
         monkeypatch.setattr(preprocessing.Image, "open", fake_open)
 
         before = set(Path(tempfile.gettempdir()).glob("documind_*.png"))
-        with pytest.raises(preprocessing.PreprocessingError):
-            with preprocessing.prepare_image(source):
-                pass
+        with pytest.raises(preprocessing.PreprocessingError),                 preprocessing.prepare_image(source):
+            pass
         after = set(Path(tempfile.gettempdir()).glob("documind_*.png"))
         assert after == before
