@@ -33,7 +33,10 @@ Exit codes: `0` success, `2` invalid manifest/files.
 Paths resolve **relative to the manifest file's directory**. Validation
 is strict: unknown task, unknown provenance, empty `documents`, missing
 fields, duplicate ids, or malformed JSON all fail loudly
-(`ManifestError`).
+(`ManifestError`). Relative paths are not jailed to the manifest's
+directory (D-25, by design): a manifest is a locally authored trust
+boundary and its paths may point anywhere the user can read — never
+treat a manifest from an untrusted source as safe.
 
 **Dataset provenance** is explicit metadata that travels into every
 summary (`dataset.provenance`) and generated report. It defaults to
@@ -75,6 +78,26 @@ contents or cell text.
   untouched. A partially evaluated aggregate is never published.
 - Metric definitions, denominators, null semantics and strict matching
   are unchanged by validation.
+
+**Resource allocation (D-22 follow-up; corrected in the 2026-10-31
+integration review).** Structural validation sets **no upper cap on
+`rows × columns`**, and no dimension or cell-count limit is enforced
+anywhere in the evaluation path. The allocation risk sits on the
+**expected (ground-truth) side**: `_compare_table` reads `rows` and
+`columns` from the *expected* table and `_predicted_matrix` allocates an
+expected-shape grid from those dimensions before scoring, while D-22's
+`require_list_of_lists` only checks nested container types — so **sparse
+ground truth that declares enormous dimensions (with few or no cells)
+passes validation and can still trigger excessive allocation or memory
+exhaustion** in `documind-eval`. Prediction dimensions do not drive this
+allocation for matched tables, and an unmatched predicted table never
+runs the matrix path (missed and extra tables contribute arithmetic
+cell totals only). This is an accepted risk for now — `documind-eval`
+is a local, single-user tool whose manifests and predictions are
+authored by the same person who runs them. **Resource budgeting
+(dimension/cell-count caps at the evaluation boundary) remains an
+unresolved backlog item**, to be implemented with its own tests at that
+boundary — not as a silent cap inside this specification.
 
 ## Task 1 — OCR (CER / WER)
 

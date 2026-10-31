@@ -4,6 +4,12 @@ pypdfium2 renders page images from untrusted PDF bytes with hard bounds:
 a page-count limit, a per-page pixel budget, and friendly errors for
 encrypted or malformed files. Page images are written to a caller-owned
 temporary directory (cleanup is the caller's responsibility).
+
+Detection precedence (D-26): `/api/process` classifies an upload as a
+PDF by the `%PDF-` magic **regardless of its extension** — the inverse
+of the image path, which requires an allowlisted extension. Extension
+checks therefore never bypass the PDF budgets, and a mislabelled
+`.png` that is really a PDF still goes through the PDF path.
 """
 
 import io
