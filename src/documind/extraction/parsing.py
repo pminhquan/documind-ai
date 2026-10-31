@@ -24,26 +24,45 @@ DATE_TOKEN_RE = re.compile(
     r"\d{1,4}[./-]\d{1,2}[./-]\d{2,4}"
     r"|\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{2,4}"
 )
+# Day-first before month-first (target locale); two-digit years follow
+# their four-digit sibling per separator. Textual month names are NOT
+# parsed with %b/%B here — those are locale-sensitive (LC_TIME), so they
+# are resolved through the explicit English MONTHS table below (D-20).
 DATE_FORMATS = (
     "%Y-%m-%d",
     "%Y/%m/%d",
     "%d/%m/%Y",
     "%d-%m-%Y",
     "%d.%m.%Y",
+    "%d-%m-%y",
+    "%d.%m.%y",
     "%m/%d/%Y",
     "%m-%d-%Y",
-    "%d %b %Y",
-    "%d %B %Y",
     "%d/%m/%y",
 )
+
+# Explicit English month names (D-20): deterministic regardless of the
+# host LC_TIME or the locale active when _strptime was first imported.
+# Same pivot as %y: 00-68 -> 2000-2068, 69-99 -> 1969-1999.
+MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "january": 1, "february": 2, "march": 3, "april": 4, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10,
+    "november": 11, "december": 12,
+}
+TEXT_DATE_RE = re.compile(r"(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{2,4})")
 
 # Money-like token used as a fallback for the rightmost amount on a
 # merged text line. Ungrouped integer digits are unbounded (1234.56,
 # 12345.67, 1234567,89 all match completely); the lookarounds reject
 # partial matches inside malformed runs like 12.34.56.78 — such tokens
-# yield no candidate instead of a silently reinterpreted value.
+# yield no candidate instead of a silently reinterpreted value. A single
+# leading minus is part of the value (refund/credit totals, D-29): it
+# binds when it directly precedes the digits; a hyphen attached to
+# letters (`A-12.50`) is ambiguous noise and matches nothing.
 MONEY_TOKEN_RE = re.compile(
-    r"(?<![\d.,])\d+(?:[.,\s]\d{3})*[.,]\d{2}(?![\d.,])"
+    r"(?<![\d.,])-?\d+(?:[.,\s]\d{3})*[.,]\d{2}(?![\d.,])"
 )
 
 # Merged-text amount scanner: every shape the token-level classifier
@@ -54,12 +73,17 @@ MONEY_TOKEN_RE = re.compile(
 # (2-digit fraction required) would. The grouped branch accepts space
 # separators (consistent with the decimal branch), and bare integers
 # need >= 2 digits so a stray single digit after the amount ("97.20 0")
-# cannot win the rightmost-match rule. Trade-off: a bare multi-digit run
-# such as a year can match when the fallback fires — summary/item rows
-# are amount-dominated text, and the arithmetic validation surfaces a
-# wrong value instead of it appearing silently.
+# cannot win the rightmost-match rule. A single leading minus binds only
+# when it directly precedes the digits and the preceding character is
+# not a word character — whitespace, line start, or punctuation such as
+# the label colon ("TOTAL:-5.00"); a hyphen attached to letters
+# ("A-12.50") is identifier noise and matches nothing. A spaced minus
+# ("- 5.00") never binds. Trade-off: a bare multi-digit run such as a
+# year can match when the fallback fires — summary/item rows are
+# amount-dominated text, and the arithmetic validation surfaces a wrong
+# value instead of it appearing silently.
 MERGED_MONEY_RE = re.compile(
-    r"(?<![\d.,])(?:\d+(?:[.,\s]\d{3})*[.,]\d{2}"
+    r"(?<![\d.,])(?<!\w-)(?:(?<!\w)-)?(?:\d+(?:[.,\s]\d{3})*[.,]\d{2}"
     r"|\d{1,3}(?:[.,\s]\d{3})+|\d{2,})(?![\d.,])"
 )
 
@@ -132,12 +156,36 @@ def parse_amount(text: str | None) -> Decimal | None:
         return None
 
 
+def _parse_text_date(token: str) -> date | None:
+    """Parse a ``25 Oct 2026``-shaped token via the explicit MONTHS table.
+
+    Two-digit years follow the same pivot as ``%y`` (00-68 -> 2000s).
+    Returns None for unknown months or impossible dates.
+    """
+    match = TEXT_DATE_RE.fullmatch(token)
+    if match is None:
+        return None
+    day_text, month_text, year_text = match.groups()
+    month = MONTHS.get(month_text.lower())
+    if month is None:
+        return None
+    year = int(year_text)
+    if year < 100:
+        year = 2000 + year if year < 69 else 1900 + year
+    try:
+        return date(year, month, int(day_text))
+    except ValueError:
+        return None
+
+
 def parse_date(text: str | None) -> date | None:
     """Find and parse the first date token in ``text``.
 
-    Format precedence follows :data:`DATE_FORMATS`; day-first
+    Numeric format precedence follows :data:`DATE_FORMATS`; day-first
     (``%d/%m/%Y``) is tried before month-first because receipts in the
-    project's target locale use day-first. Returns an ISO date or None.
+    project's target locale use day-first. Textual month names resolve
+    through the explicit English :data:`MONTHS` table, never through the
+    locale-sensitive ``%b``/``%B`` (D-20). Returns an ISO date or None.
     """
     if not text:
         return None
@@ -149,4 +197,7 @@ def parse_date(text: str | None) -> date | None:
                 return datetime.strptime(token, fmt).date()
             except ValueError:
                 continue
+        parsed = _parse_text_date(token)
+        if parsed is not None:
+            return parsed
     return None
