@@ -8,15 +8,34 @@
 
 **2026-10-31 checkpoint (post-Windows-reinstall recovery + P3 audit batch):** verified `origin/main` @ `4d01e78ec95d58f3b7ca2113da08489e8ec1092d` (PR #16 merge, D-22 integrated; 643 tests green locally on a rebuilt Python 3.12.10 venv). The remaining reproducible P3 audit items were implemented in **seven open Draft PRs** targeting `main` (review/merge order: #17 → #18 → #19 → #20 → #21 → #22 → #23; all CI-green on their exact head SHA). **This is a dated 2026-10-31 snapshot of open-PR state — once these PRs merge, the table below describes history, not the current state; consult `gh pr list` for live status.**
 
-| PR | Branch / head | Defect | Summary |
-|----|---------------|--------|---------|
-| #17 | `fix/d23-d24-dataset-lifecycle` @ `92424c5` | D-23, D-24 | `add` refuses uninitialized datasets; `validate` flags manifest/annotation drift (CI [41184862148](https://github.com/pminhquan/documind-ai/actions/runs/41184862148)) |
-| #18 | `fix/d29-d30-d20-signed-amounts-dates` @ `90984ce` | D-29, D-30, D-20 | signed money tokens; `%d-%m-%y`/`%d.%m.%y`; explicit English month table (no `LC_TIME` dependency) (CI [41185722681](https://github.com/pminhquan/documind-ai/actions/runs/41185722681)) |
-| #19 | `fix/d31-word-level-qty-price` @ `e764dc6` | D-31 | qty × price extraction across word-level OCR regions (CI [41186293559](https://github.com/pminhquan/documind-ai/actions/runs/41186293559)) |
-| #20 | `fix/d32-header-provenance` @ `6bf7e12` | D-32 | header provenance points at the value region, not the label (CI [41186516167](https://github.com/pminhquan/documind-ai/actions/runs/41186516167)) |
-| #21 | `fix/d34-assign-line-tolerance` @ `71d9f7a` | D-34 | reading-order line tolerance anchors on the tallest token (CI [41186716285](https://github.com/pminhquan/documind-ai/actions/runs/41186716285)) |
-| #22 | `fix/d33-temp-cleanup` @ `57a0cd1` | D-33 | temp RGB PNG removed on any conversion failure (CI [41186999690](https://github.com/pminhquan/documind-ai/actions/runs/41186999690)) |
-| #23 | `fix/d28-ocr-json-byte-guard` @ `469879c` | D-28 | 50 MB OCR JSON guard wired at `load_ocr_document`; dead `to_decimal` removed (CI [41187133199](https://github.com/pminhquan/documind-ai/actions/runs/41187133199)) |
+Heads and CI below are the post-review values verified on 2026-10-31; the per-PR test count is the exact pytest total from that PR's CI log (independent branches — these are not additive):
+
+| PR | Branch / head | Defect | CI-verified tests | CI run |
+|----|---------------|--------|-------------------|--------|
+| #17 | `fix/d23-d24-dataset-lifecycle` @ `defee19` | D-23, D-24 | 648 | [41190483549](https://github.com/pminhquan/documind-ai/actions/runs/41190483549) |
+| #18 | `fix/d29-d30-d20-signed-amounts-dates` @ `17bee92` | D-29, D-30, D-20 | 691 | [41189309375](https://github.com/pminhquan/documind-ai/actions/runs/41189309375) |
+| #19 | `fix/d31-word-level-qty-price` @ `9236b23` | D-31 | 649 | [41189908070](https://github.com/pminhquan/documind-ai/actions/runs/41189908070) |
+| #20 | `fix/d32-header-provenance` @ `6bf7e12` | D-32 | 647 | [41186516167](https://github.com/pminhquan/documind-ai/actions/runs/41186516167) |
+| #21 | `fix/d34-assign-line-tolerance` @ `42c0d07` | D-34 | 649 | [41190169093](https://github.com/pminhquan/documind-ai/actions/runs/41190169093) |
+| #22 | `fix/d33-temp-cleanup` @ `57a0cd1` | D-33 | 644 | [41186999690](https://github.com/pminhquan/documind-ai/actions/runs/41186999690) |
+| #23 | `fix/d28-ocr-json-byte-guard` @ `469879c` | D-28 | 645 | [41187133199](https://github.com/pminhquan/documind-ai/actions/runs/41187133199) |
+
+**Cumulative integration dry-run (2026-10-31, verified):** on a throwaway
+worktree/branch at `origin/main` @ `4d01e78` (never pushed, removed
+afterwards), the seven heads above were merged sequentially (#17 → #18 →
+#19 → #20 → #21 → #22 → #23) with ordinary local merge commits. All
+seven merges were conflict-free; shared files (`extractor.py`,
+`parsing.py`, `tests/test_extraction.py`) kept every regression test;
+the review-fix versions (tight-label regex, qty-only guard) survived.
+The combined tree collected and passed **715 pytest tests** (643 main +
+72 additive across the seven PRs — matches the per-PR CI counts),
+with ruff and the frontend gate green, `git diff --check` clean, and
+synthetic end-to-end checks passing for signed totals (incl. the tight
+label `TOTAL:-5.00`), two-digit-year and textual dates, word-level
+quantity rows (with and without a printed total), split-region header
+provenance, D-16 headerless receipts, and D-22 malformed-input
+rejection. No evaluation metric files were touched by any of the seven
+PRs.
 
 Closed as already-resolved or documented without code changes: **D-27** (correction keys use per-File sequential doc ids — no name collisions), **D-25** and **D-26** (documented in `docs/evaluation-spec.md` / `pdf.py` docstring), **D-21** (UTF-8-without-BOM documented as existing compatibility behavior with a **pending product decision** in `docs/web-api.md`), and the evaluation `rows × columns` allocation risk (documented in `docs/evaluation-spec.md`: the table evaluator allocates its expected-shape grid from the GROUND-TRUTH side's declared dimensions — sparse ground truth with enormous declared dimensions passes validation and can exhaust memory, so file size alone does not bound memory; accepted local-tool risk, with resource budgeting recorded as an unresolved backlog item). None of these PRs are merged; the owner reviews and merges. The recovery session also rebuilt the Windows environment: Python 3.12.10 via winget, repaired `.venv` (packages preserved), Node.js LTS for the frontend gate, and fixed post-reinstall file-ownership (old-SID ACLs) that blocked git/pip writes.
 
@@ -462,4 +481,4 @@ This architecture keeps everything testable, reproducible, and debuggable. The p
 
 ---
 
-*End of handoff. Checkpoint: main `4d01e78` (PR #16 merged, D-22 integrated; 643 tests at that SHA), with P3 fixes pending in Draft PRs #17–#23 (CI green on each head; 644–678 collected tests depending on the PR, counted per independent branch). Check the live PRs and current `origin/main` before acting. This document is not a substitute for Git.*
+*End of handoff. Checkpoint: main `4d01e78` (PR #16 merged, D-22 integrated; 643 tests at that SHA), with P3 fixes pending in Draft PRs #17–#23 (CI green on each head; per-PR CI totals 643–691 tests on independent branches — see the table above). Check the live PRs and current `origin/main` before acting. This document is not a substitute for Git.*
