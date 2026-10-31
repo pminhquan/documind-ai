@@ -490,3 +490,30 @@ class TestReadinessReporting:
         assert ok is False
         assert any("not ready: ocr" in line for line in lines)
         assert any("doc-a" in line and "ground truth" in line for line in lines)
+
+    def test_manifest_task_mismatch_is_not_ready(self, tmp_path):
+        """Review finding: a manifest whose content task disagrees with
+        its filename (manifest-ocr.json declaring task 'invoice') must
+        not mark the filename task ready to evaluate."""
+        root = tmp_path / "real"
+        main(["init", "--root", str(root)])
+        image = make_image(tmp_path, "doc.png")
+        main(["add", str(image), "--id", "doc", "--root", str(root),
+              "--confirm-anonymized"])
+        (root / "ground_truth" / "doc.ocr.json").write_text(
+            json.dumps({"id": "doc", "reference_text": "x"}), encoding="utf-8")
+        (root / "predictions").mkdir(exist_ok=True)
+        (root / "predictions" / "doc.ocr.json").write_text(
+            json.dumps({"full_text": "x", "items": []}), encoding="utf-8")
+        (root / "manifest-ocr.json").write_text(json.dumps(
+            {"task": "invoice", "provenance": "real",
+             "documents": [{"id": "doc",
+                            "prediction": "predictions/doc.ocr.json",
+                            "ground_truth": "ground_truth/doc.ocr.json"}]}),
+            encoding="utf-8")
+
+        ok, lines = validate_dataset(root)
+        assert ok is False
+        assert any("does not match" in line and "manifest-ocr.json" in line
+                   for line in lines)
+        assert not any("ready to evaluate: ocr" in line for line in lines)

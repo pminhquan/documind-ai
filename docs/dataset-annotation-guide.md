@@ -26,7 +26,11 @@ documind-dataset add path\to\anonymized-receipt.jpg --id receipt-001 --confirm-a
 #    keys, table matrix shapes, manifest validity and coverage — a task
 #    is only reported ready to evaluate when its manifest entries exactly
 #    cover the annotated documents; annotations added after the last
-#    predict, or entries whose ground truth disappeared, are flagged):
+#    predict, entries whose ground truth disappeared, or a manifest whose
+#    declared task disagrees with its filename are flagged). Coverage is
+#    checked by document id: content edits to an existing annotation
+#    (same id) or regenerated prediction artifacts are not detected —
+#    annotate deliberately and re-run predict after edits:
 documind-dataset validate
 
 # 5. Run the existing pipelines on annotated documents (local venv;

@@ -241,11 +241,15 @@ def validate_dataset(root: str | Path | None = None) -> tuple[bool, list[str]]:
     Returns ``(ok, lines)``: human-readable lines describing coverage,
     every error found, and per-task readiness. ``ok`` is False when at
     least one error exists. Readiness ("ready to evaluate") means the
-    task has annotated documents AND a valid manifest whose prediction
-    files all exist AND whose entries exactly cover the annotated
-    documents — annotations added after the last ``predict`` or manifest
-    entries whose ground truth disappeared make the task not ready. It is
-    reported separately from structural validity.
+    task has annotated documents AND a valid manifest whose declared task
+    matches its filename, whose prediction files all exist AND whose
+    entries exactly cover the annotated documents — annotations added
+    after the last ``predict``, manifest entries whose ground truth
+    disappeared, or a filename/task mismatch make the task not ready. It
+    is reported separately from structural validity. Coverage is checked
+    by document id: content edits to an existing annotation (same id) or
+    regenerated prediction artifacts are not detected — annotate
+    deliberately and re-run ``predict`` after edits.
     """
     base = dataset_root(root)
     lines: list[str] = [f"dataset root: {base}"]
@@ -278,6 +282,17 @@ def validate_dataset(root: str | Path | None = None) -> tuple[bool, list[str]]:
             errors.append(f"{manifest_path.name}: invalid manifest ({exc})")
             if task in TASKS:
                 manifest_status[task] = False
+            continue
+        if task in TASKS and manifest.task != task:
+            # Review (D-24): the filename decides which readiness slot a
+            # manifest feeds — a content/filename disagreement would
+            # otherwise mark the wrong task ready.
+            errors.append(
+                f"{manifest_path.name}: manifest task {manifest.task!r} does "
+                f"not match its filename task {task!r} — fix the manifest's "
+                "'task' field or rename the file"
+            )
+            manifest_status[task] = False
             continue
         missing_predictions = [
             entry.prediction.name for entry in manifest.entries
