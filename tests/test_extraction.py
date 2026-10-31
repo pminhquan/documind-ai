@@ -494,7 +494,7 @@ class TestWordLevelQtyPrice:
         assert [
             (i.description, i.quantity, i.unit_price, i.line_total)
             for i in result.invoice.line_items
-        ] == [("SOAP", Decimal("2"), Decimal("2.50"), Decimal("5.00"))]
+        ] == [("SOAP", Decimal(2), Decimal("2.50"), Decimal("5.00"))]
         assert result.invoice.total == Decimal("5.00")
 
     def test_word_level_provenance_points_at_value_tokens(self):
