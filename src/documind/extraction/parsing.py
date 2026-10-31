@@ -98,18 +98,6 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text)).strip()
 
 
-def to_decimal(number_text: str) -> Decimal | None:
-    """Parse a bare numeric token like ``2``, ``2.50`` or ``2,50``."""
-    cleaned = number_text.strip().replace(" ", "")
-    cleaned = re.sub(CURRENCY_NOISE_RE, "", cleaned)
-    if not cleaned:
-        return None
-    try:
-        return Decimal(cleaned.replace(",", "."))
-    except InvalidOperation:
-        return None
-
-
 def parse_amount(text: str | None) -> Decimal | None:
     r"""Parse a full cell/line as one monetary amount, or return None.
 

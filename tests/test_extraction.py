@@ -561,6 +561,27 @@ class TestEdgeCases:
         with pytest.raises(OcrInputError, match="must be an object"):
             load_ocr_document(path)
 
+    def test_oversized_ocr_json_rejected_at_load(self, tmp_path, monkeypatch):
+        """D-28: MAX_OCR_JSON_BYTES is enforced at the load boundary."""
+        import documind.extraction.extractor as extractor_module
+
+        monkeypatch.setattr(extractor_module, "MAX_OCR_JSON_BYTES", 16)
+        path = tmp_path / "big.json"
+        path.write_text(json.dumps({"items": [{"text": "x" * 64}]}),
+                        encoding="utf-8")
+        with pytest.raises(OcrInputError, match="input limit"):
+            load_ocr_document(path)
+
+    def test_ocr_json_at_exact_limit_is_accepted(self, tmp_path, monkeypatch):
+        import documind.extraction.extractor as extractor_module
+
+        monkeypatch.setattr(extractor_module, "MAX_OCR_JSON_BYTES", 16)
+        path = tmp_path / "exact.json"
+        content = '{"items": []}   '  # exactly 16 bytes
+        assert len(content.encode("utf-8")) == 16
+        path.write_text(content, encoding="utf-8")
+        assert load_ocr_document(path) == {"items": []}
+
     def test_multi_line_product_description(self):
         result = extract(load_fixture("multiline_description.json"))
         item = result.invoice.line_items[0]
