@@ -818,8 +818,15 @@ def _parse_item_line(
     item = LineItem(description=description, quantity=quantity, unit_price=unit_price)
     if amount_tokens:
         total_token = amount_tokens[-1]
-        item.line_total = parse_amount(total_token.text)
-        prov["line_total"] = total_token
+        # Review (D-31): on a row without a printed total ("SOAP 2 x
+        # 2.50") the rightmost money token IS the unit price inside the
+        # qty x price pattern — mislabeling it as the line total also
+        # made the validator report a fake arithmetic mismatch. Pattern
+        # operands never count as the total, and total = qty x price is
+        # never derived: totals come from printed text only.
+        if total_token is not prov["quantity"] and total_token is not prov["unit_price"]:
+            item.line_total = parse_amount(total_token.text)
+            prov["line_total"] = total_token
     elif qty_match:
         # Merged single-token row like "SOAP 2 x 2.50 5.00": the line
         # total is the rightmost complete money token after the
