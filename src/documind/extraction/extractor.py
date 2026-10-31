@@ -328,6 +328,17 @@ def _amount_token(line: VisualLine, amount_text: str) -> OcrToken | None:
     return None
 
 
+def _token_containing(line: VisualLine, value: str) -> OcrToken:
+    """First token whose text contains ``value`` (D-32): header provenance
+    must point at the region holding the captured value, not at the label
+    token. Falls back to the line's first token when the value spans or
+    escapes token text (e.g. after diacritic folding)."""
+    for token in line.tokens:
+        if value in token.text:
+            return token
+    return line.tokens[0]
+
+
 def _merged_trailing_amount(text: str) -> tuple[str, Decimal, str] | None:
     """Split a merged ``description + trailing amount`` row.
 
@@ -512,7 +523,7 @@ class _Extractor:
                 # without a word character and keep scanning.
                 if re.search(r"\w", value):
                     self.invoice.supplier = value
-                    self._record("supplier", line.tokens[0])
+                    self._record("supplier", _token_containing(line, value))
                     return
             if parse_date(line.text) or _rightmost_amount(line) is not None:
                 continue
@@ -533,7 +544,8 @@ class _Extractor:
             )
             if match:
                 self.invoice.invoice_number = match.group(1)
-                self._record("invoice_number", line.tokens[0])
+                self._record("invoice_number",
+                             _token_containing(line, match.group(1)))
                 return
 
     def extract_date(self, lines: list[VisualLine]) -> None:
@@ -544,7 +556,15 @@ class _Extractor:
             parsed = parse_date(line.text)
             if parsed is not None:
                 self.invoice.invoice_date = parsed
-                self._record("invoice_date", line.tokens[0])
+                # D-32: the date value may live in a value-only region;
+                # re-parse per token to locate it, falling back to the
+                # label-bearing region when the value spans tokens.
+                token = next(
+                    (item for item in line.tokens
+                     if parse_date(item.text) == parsed),
+                    line.tokens[0],
+                )
+                self._record("invoice_date", token)
                 return
 
     def extract_currency(self, lines: list[VisualLine]) -> None:
