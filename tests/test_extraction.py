@@ -505,6 +505,58 @@ class TestHeaderFieldRobustness:
         assert result.invoice.currency == "VND"
 
 
+class TestHeaderProvenance:
+    """D-32: header-field provenance must point at the OCR region that
+    holds the captured value, not at the label token, when a line splits
+    label and value across regions."""
+
+    def test_invoice_number_provenance_points_at_value_token(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Receipt", 10), ("#:", 90), ("00001234", 140)],
+            [("Date: 25/10/2026", 10)],
+            [("TOTAL 9.57", 10)],
+        ]), source="t")
+        assert result.invoice.invoice_number == "00001234"
+        assert result.provenance["invoice_number"].text == "00001234"
+
+    def test_date_provenance_points_at_date_token(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice", 10), ("No: A-123", 120)],
+            [("Date:", 10), ("25/10/2026", 90)],
+            [("TOTAL 9.57", 10)],
+        ]), source="t")
+        assert result.invoice.invoice_date.isoformat() == "2026-10-25"
+        assert result.provenance["invoice_date"].text == "25/10/2026"
+
+    def test_labelled_supplier_provenance_points_at_value_token(self):
+        result = extract(ocr_doc([
+            [("TEN CUA HANG:", 10), ("MINI MART", 150)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL 9.57", 10)],
+        ]), source="t")
+        assert result.invoice.supplier == "MINI MART"
+        assert result.provenance["supplier"].text == "MINI MART"
+
+    def test_inline_label_value_keeps_region_provenance(self):
+        """The inline shape (`Receipt #: 00001234` in one region) is
+        unaffected: the single region both is the label and holds the
+        value."""
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Receipt #: 00001234", 10)],
+            [("Date: 25/10/2026", 10)],
+            [("TOTAL 9.57", 10)],
+        ]), source="t")
+        assert result.invoice.invoice_number == "00001234"
+        assert result.provenance["invoice_number"].text == "Receipt #: 00001234"
+
+
 class TestShortHeaderlessReceipts:
     """D-16: short receipts without a table header must not lose their
     line items to a fixed 3-line letterhead skip. Headerless candidates
