@@ -79,6 +79,16 @@ class TestAdd:
             add_document(image, "receipt-001", root=initialized_root,
                          confirm_anonymized=True)
 
+    def test_add_before_init_fails_without_partial_state(self, tmp_path):
+        image = make_image(tmp_path / "raw", "receipt-001.jpg")
+        root = tmp_path / "real"
+        with pytest.raises(DatasetError, match="not initialized"):
+            add_document(image, "receipt-001", root=root,
+                         confirm_anonymized=True)
+        # No misleading partial dataset may appear without 'init'.
+        assert not (root / "anonymized").exists()
+        assert not (root / "README.md").exists()
+
 
 class TestValidate:
     def test_fresh_dataset_is_valid(self, initialized_root):
@@ -190,6 +200,14 @@ class TestDatasetCli:
         (root / "ground_truth" / "doc.ocr.json").write_text(
             "{not json", encoding="utf-8")
         assert main(["validate", "--root", str(root)]) == 1
+
+    def test_add_before_init_returns_exit_two_with_hint(self, tmp_path, capsys):
+        raw_image = make_image(tmp_path / "raw", "receipt-001.png")
+        root = tmp_path / "real"
+        assert main(["add", str(raw_image), "--id", "receipt-001",
+                     "--root", str(root), "--confirm-anonymized"]) == 2
+        assert "init" in capsys.readouterr().err
+        assert not (root / "anonymized").exists()
 
     def test_predict_without_annotations_is_a_noop(self, tmp_path, capsys):
         root = tmp_path / "real"
@@ -424,3 +442,78 @@ class TestReadinessReporting:
         ok, lines = validate_dataset(root)
         assert ok is True
         assert any("ready to evaluate: ocr" in line for line in lines)
+
+    @staticmethod
+    def _setup_ready_ocr_dataset(tmp_path, monkeypatch, doc_ids):
+        """init -> add -> annotate -> mocked predict for the given ids."""
+        root = tmp_path / "real"
+        main(["init", "--root", str(root)])
+        for doc_id in doc_ids:
+            image = make_image(tmp_path, f"{doc_id}.png")
+            main(["add", str(image), "--id", doc_id, "--root", str(root),
+                  "--confirm-anonymized"])
+            (root / "ground_truth" / f"{doc_id}.ocr.json").write_text(
+                json.dumps({"id": doc_id, "reference_text": "x"}),
+                encoding="utf-8")
+
+        def fake_ocr_main(argv):
+            Path(argv[argv.index("-o") + 1]).write_text(
+                json.dumps({"full_text": "x", "items": []}))
+            return 0
+
+        monkeypatch.setattr("documind.cli.main", fake_ocr_main)
+        main(["predict", "--task", "ocr", "--root", str(root)])
+        return root
+
+    def test_annotation_after_predict_is_not_ready(self, tmp_path, monkeypatch):
+        """D-24: a manifest written before the latest annotations must not
+        mark the task ready to evaluate."""
+        root = self._setup_ready_ocr_dataset(tmp_path, monkeypatch, ["doc-a"])
+        image = make_image(tmp_path, "doc-b.png")
+        main(["add", str(image), "--id", "doc-b", "--root", str(root),
+              "--confirm-anonymized"])
+        (root / "ground_truth" / "doc-b.ocr.json").write_text(
+            json.dumps({"id": "doc-b", "reference_text": "y"}), encoding="utf-8")
+
+        ok, lines = validate_dataset(root)
+        assert ok is False
+        assert any("not ready: ocr" in line for line in lines)
+        assert any("doc-b" in line and "predict" in line for line in lines)
+
+    def test_deleted_ground_truth_stales_manifest(self, tmp_path, monkeypatch):
+        """D-24: manifest entries whose ground truth disappeared are stale
+        coverage, not ready to evaluate."""
+        root = self._setup_ready_ocr_dataset(tmp_path, monkeypatch, ["doc-a"])
+        (root / "ground_truth" / "doc-a.ocr.json").unlink()
+
+        ok, lines = validate_dataset(root)
+        assert ok is False
+        assert any("not ready: ocr" in line for line in lines)
+        assert any("doc-a" in line and "ground truth" in line for line in lines)
+
+    def test_manifest_task_mismatch_is_not_ready(self, tmp_path):
+        """Review finding: a manifest whose content task disagrees with
+        its filename (manifest-ocr.json declaring task 'invoice') must
+        not mark the filename task ready to evaluate."""
+        root = tmp_path / "real"
+        main(["init", "--root", str(root)])
+        image = make_image(tmp_path, "doc.png")
+        main(["add", str(image), "--id", "doc", "--root", str(root),
+              "--confirm-anonymized"])
+        (root / "ground_truth" / "doc.ocr.json").write_text(
+            json.dumps({"id": "doc", "reference_text": "x"}), encoding="utf-8")
+        (root / "predictions").mkdir(exist_ok=True)
+        (root / "predictions" / "doc.ocr.json").write_text(
+            json.dumps({"full_text": "x", "items": []}), encoding="utf-8")
+        (root / "manifest-ocr.json").write_text(json.dumps(
+            {"task": "invoice", "provenance": "real",
+             "documents": [{"id": "doc",
+                            "prediction": "predictions/doc.ocr.json",
+                            "ground_truth": "ground_truth/doc.ocr.json"}]}),
+            encoding="utf-8")
+
+        ok, lines = validate_dataset(root)
+        assert ok is False
+        assert any("does not match" in line and "manifest-ocr.json" in line
+                   for line in lines)
+        assert not any("ready to evaluate: ocr" in line for line in lines)
