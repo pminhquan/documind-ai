@@ -5,6 +5,7 @@ or claims model accuracy — these tests validate the deterministic rules.
 """
 
 import json
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -101,6 +102,11 @@ class TestDateFormats:
             ("Date: 25.10.2026", "2026-10-25"),
             ("Date: 05 Apr 2026", "2026-04-05"),
             ("Date: 10/25/2026", "2026-10-25"),  # month-first fallback
+            ("Date: 25/10/26", "2026-10-25"),  # two-digit year, slash
+            ("Date: 25.10.26", "2026-10-25"),  # D-30: two-digit year, dot
+            ("Date: 25-10-26", "2026-10-25"),  # D-30: two-digit year, dash
+            ("Date: 25.10.68", "2068-10-25"),  # %y pivot: 00-68 -> 2000s
+            ("Date: 25.10.69", "1969-10-25"),  # %y pivot: 69-99 -> 1900s
         ],
     )
     def test_date_normalization(self, date_text, expected):
@@ -111,6 +117,10 @@ class TestDateFormats:
 
     def test_unparseable_date_stays_none(self):
         document = {"items": [{"text": "Date: sometime soon", "box": []}]}
+        assert extract(document).invoice.invoice_date is None
+
+    def test_invalid_two_digit_date_stays_none(self):
+        document = {"items": [{"text": "Date: 32.13.26", "box": []}]}
         assert extract(document).invoice.invoice_date is None
 
 
@@ -295,6 +305,121 @@ class TestMonetarySeparators:
         assert invoice.tax == money("234.56")
         assert invoice.total == money("1234.56")
         assert invoice.validation_status == STATUS_OK
+
+
+class TestNegativeAmounts:
+    """D-29: a minus sign is part of the printed value (refund/credit
+    totals, `TOTAL -5.00` must not become `5.00`). Sign binding is
+    conservative, matching the malformed-run discipline: a minus binds
+    when it directly precedes the digits after whitespace or line start;
+    a hyphen attached to letters (`A-12.50`) is ambiguous noise and
+    matches nothing instead of a silently reinterpreted value."""
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("TOTAL -5.00", "-5.00"),
+            ("TOTAL -5,00", "-5.00"),
+            ("TOTAL -1,234.56", "-1234.56"),
+            ("TOTAL -1.234,56", "-1234.56"),
+            ("TOTAL -20.000", "-20000"),
+            ("TOTAL -5.00đ", "-5.00"),
+            ("TOTAL 5.00", "5.00"),  # positive unchanged
+            ("TOTAL - 5.00", "5.00"),  # spaced minus never binds
+        ],
+    )
+    def test_negative_merged_totals_keep_sign(self, text, expected):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text=text, box=())])
+        assert _rightmost_amount(line) == Decimal(expected)
+
+    def test_separate_negative_token_keeps_sign(self):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text="TOTAL", box=()),
+                                  OcrToken(index=1, text="-5.00", box=())])
+        assert _rightmost_amount(line) == Decimal("-5.00")
+
+    def test_letter_attached_hyphen_amount_is_not_reinterpreted(self):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text="SKU A-12.50", box=())])
+        assert _rightmost_amount(line) is None
+
+    def test_negative_total_end_to_end(self):
+        document = {"items": [
+            {"text": "MINI MART", "box": []},
+            {"text": "TOTAL -5.00", "box": []},
+        ]}
+        assert extract(document).invoice.total == Decimal("-5.00")
+
+    def test_negative_total_provenance_keeps_region(self):
+        document = {"items": [
+            {"text": "MINI MART", "box": []},
+            {"text": "TOTAL -5.00", "box": []},
+        ]}
+        result = extract(document)
+        assert result.provenance["total"].text == "TOTAL -5.00"
+
+
+class TestDeterministicMonthNames:
+    """D-20: textual month names come from an explicit English table, so
+    parsing never depends on the host LC_TIME or on which locale happened
+    to be active when `_strptime` was first imported."""
+
+    @pytest.mark.parametrize(
+        "abbr, month",
+        [
+            ("Jan", 1), ("feb", 2), ("MAR", 3), ("Apr", 4), ("May", 5),
+            ("Jun", 6), ("Jul", 7), ("Aug", 8), ("Sep", 9), ("Oct", 10),
+            ("Nov", 11), ("Dec", 12),
+        ],
+    )
+    def test_all_abbreviations_case_insensitive(self, abbr, month):
+        from documind.extraction.parsing import parse_date
+
+        assert parse_date(f"05 {abbr} 2026") == date(2026, month, 5)
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("Date: 05 April 2026", "2026-04-05"),
+            ("Date: 01 September 2026", "2026-09-01"),
+            ("Date: 25 December 2026", "2026-12-25"),
+        ],
+    )
+    def test_full_month_names(self, text, expected):
+        document = {"items": [{"text": "MINI MART", "box": []},
+                              {"text": text, "box": []}]}
+        result = extract(document)
+        assert result.invoice.invoice_date.isoformat() == expected
+
+    def test_unknown_month_stays_none(self):
+        from documind.extraction.parsing import parse_date
+
+        assert parse_date("05 Xyz 2026") is None
+
+    def test_month_names_do_not_consult_strptime_locale_data(self, monkeypatch):
+        """No date path may reach the locale-sensitive %b/%B formats whose
+        result depends on the host LC_TIME (D-20)."""
+        import _strptime
+
+        real_strptime = _strptime._strptime
+
+        def guard(data_string, fmt, **kwargs):
+            if "%b" in fmt or "%B" in fmt:
+                raise AssertionError(f"locale-sensitive format used: {fmt}")
+            return real_strptime(data_string, fmt, **kwargs)
+
+        monkeypatch.setattr(_strptime, "_strptime", guard)
+        from documind.extraction.parsing import parse_date
+
+        assert parse_date("05 Oct 2026") == date(2026, 10, 5)
+        assert parse_date("25.10.2026") == date(2026, 10, 25)  # numeric path intact
 
 
 class TestMissingBoxes:
