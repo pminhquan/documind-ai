@@ -249,6 +249,15 @@ MAX_OCR_JSON_BYTES = 50 * 1024 * 1024
 def load_ocr_document(path: str | Path) -> dict:
     """Load and structurally validate a saved OCR JSON document."""
     document_path = Path(path)
+    # D-28: input-size guard at the load boundary — reject absurd inputs
+    # before reading/parsing them instead of silently accepting them
+    # (same philosophy as the OCR pipeline's image size limit).
+    size = document_path.stat().st_size
+    if size > MAX_OCR_JSON_BYTES:
+        raise OcrInputError(
+            f"OCR JSON exceeds the {MAX_OCR_JSON_BYTES // (1024 * 1024)} MB "
+            f"input limit ({size} bytes): '{document_path}'"
+        )
     raw = document_path.read_text(encoding="utf-8")
     try:
         document = json.loads(raw)
