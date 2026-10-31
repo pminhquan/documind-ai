@@ -79,17 +79,22 @@ contents or cell text.
 - Metric definitions, denominators, null semantics and strict matching
   are unchanged by validation.
 
-**Resource allocation (D-22 follow-up, recorded decision).** Structural
-validation deliberately sets **no upper cap on `rows × columns`**. A
-declared shape cannot inflate memory by itself: ground-truth `cells`
-must be a physical `rows × columns` matrix and predicted cells arrive as
-an explicit list, so the memory an evaluation pass uses is bounded by
-the input file sizes the owner chose to place on disk. `documind-eval`
-is a local, single-user tool whose manifests are authored by the same
-person who runs it — the trust boundary is the filesystem, not a network
-peer. If evaluation ever runs on untrusted uploads, add an explicit
-cell-count budget at that new boundary (with tests), not a silent cap
-here.
+**Resource allocation (D-22 follow-up; corrected 2026-10-31 review).**
+Structural validation sets **no upper cap on `rows × columns`** — and
+the declared dimensions are **not** memory-safe by themselves.
+Ground-truth `cells` must physically be a `rows × columns` matrix, so
+the ground-truth side is bounded by the file on disk; the **prediction
+side is not**: the table evaluator builds an expected-shape grid from
+the declared `rows`/`columns` (`_predicted_matrix` in
+`src/documind/evaluation/table_eval.py`), so a tiny prediction file
+declaring enormous dimensions can still trigger excessive allocation or
+memory exhaustion in `documind-eval`. This is an accepted risk for now —
+`documind-eval` is a local, single-user tool whose manifests and
+predictions are authored by the same person who runs them. **Resource
+budgeting (dimension/cell-count caps at the evaluation boundary) is
+recorded as a separate backlog item** for future evaluation work, to be
+implemented with its own tests at that boundary — not as a silent cap
+inside this specification.
 
 ## Task 1 — OCR (CER / WER)
 

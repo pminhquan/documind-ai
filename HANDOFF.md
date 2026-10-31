@@ -6,7 +6,7 @@
 
 **Project state:** M0/M1, M2, M3A, M4A, M4B Phase 1, M5A, M5B (including D-18), M5C extraction rules, and M5D synthetic performance baseline are complete and integrated on `main`. M4B Phase 2 remains pending real labeled data.
 
-**2026-10-31 checkpoint (post-Windows-reinstall recovery + P3 audit batch):** verified `origin/main` @ `4d01e78ec95d58f3b7ca2113da08489e8ec1092d` (PR #16 merge, D-22 integrated; 643 tests green locally on a rebuilt Python 3.12.10 venv). The remaining reproducible P3 audit items are implemented in **seven open Draft PRs** targeting `main` (review/merge order: #17 → #18 → #19 → #20 → #21 → #22 → #23; all CI-green on their exact head SHA):
+**2026-10-31 checkpoint (post-Windows-reinstall recovery + P3 audit batch):** verified `origin/main` @ `4d01e78ec95d58f3b7ca2113da08489e8ec1092d` (PR #16 merge, D-22 integrated; 643 tests green locally on a rebuilt Python 3.12.10 venv). The remaining reproducible P3 audit items were implemented in **seven open Draft PRs** targeting `main` (review/merge order: #17 → #18 → #19 → #20 → #21 → #22 → #23; all CI-green on their exact head SHA). **This is a dated 2026-10-31 snapshot of open-PR state — once these PRs merge, the table below describes history, not the current state; consult `gh pr list` for live status.**
 
 | PR | Branch / head | Defect | Summary |
 |----|---------------|--------|---------|
@@ -18,13 +18,13 @@
 | #22 | `fix/d33-temp-cleanup` @ `57a0cd1` | D-33 | temp RGB PNG removed on any conversion failure (CI [41186999690](https://github.com/pminhquan/documind-ai/actions/runs/41186999690)) |
 | #23 | `fix/d28-ocr-json-byte-guard` @ `469879c` | D-28 | 50 MB OCR JSON guard wired at `load_ocr_document`; dead `to_decimal` removed (CI [41187133199](https://github.com/pminhquan/documind-ai/actions/runs/41187133199)) |
 
-Closed as already-resolved or documented without code changes: **D-27** (correction keys use per-File sequential doc ids — no name collisions), **D-25** and **D-26** (documented in `docs/evaluation-spec.md` / `pdf.py` docstring), **D-21** (UTF-8-without-BOM recorded as an explicit owner decision in `docs/web-api.md`), and the evaluation `rows × columns` resource question (documented no-cap rationale in `docs/evaluation-spec.md`). None of these PRs are merged; the owner reviews and merges. The recovery session also rebuilt the Windows environment: Python 3.12.10 via winget, repaired `.venv` (packages preserved), Node.js LTS for the frontend gate, and fixed post-reinstall file-ownership (old-SID ACLs) that blocked git/pip writes.
+Closed as already-resolved or documented without code changes: **D-27** (correction keys use per-File sequential doc ids — no name collisions), **D-25** and **D-26** (documented in `docs/evaluation-spec.md` / `pdf.py` docstring), **D-21** (UTF-8-without-BOM documented as existing compatibility behavior with a **pending product decision** in `docs/web-api.md`), and the evaluation `rows × columns` allocation risk (documented in `docs/evaluation-spec.md`: the table evaluator allocates its expected grid from the declared dimensions, so file size alone does not bound memory — accepted local-tool risk, with resource budgeting recorded as a backlog item). None of these PRs are merged; the owner reviews and merges. The recovery session also rebuilt the Windows environment: Python 3.12.10 via winget, repaired `.venv` (packages preserved), Node.js LTS for the frontend gate, and fixed post-reinstall file-ownership (old-SID ACLs) that blocked git/pip writes.
 
 **Dated release checkpoint:** at the post-D18 release checkpoint, main SHA `130f322` had **392 passing pytest tests**; CI run [40439790177](https://github.com/pminhquan/documind-ai/actions/runs/40439790177) completed successfully. This is a historical verified snapshot, not a promise that future HEADs always have 392 tests.
 
-**D-16 / PR #15:** merged into `main` via PR #15 (merge commit `231cd909924f75b4d46816ca028bbdca5b6107ef`, 2026-10-29; 519 tests, CI run [40843248171](https://github.com/pminhquan/documind-ai/actions/runs/40843248171)). The base `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge) did **not** contain D-16. **D-22 / Draft PR:** evaluation-input validation is implemented in its Draft PR; check the live PR and current `origin/main` HEAD for integration status. After D-22 integration, relevant P3 audit items are the next engineering work.
+**D-16 / PR #15:** merged into `main` via PR #15 (merge commit `231cd909924f75b4d46816ca028bbdca5b6107ef`, 2026-10-29; 519 tests, CI run [40843248171](https://github.com/pminhquan/documind-ai/actions/runs/40843248171)). The base `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge) did **not** contain D-16. **D-22 / PR #16:** evaluation-input validation is merged on `main` (merge commit `4d01e78ec95d58f3b7ca2113da08489e8ec1092d`); do not reimplement it. The relevant P3 audit follow-ups are the open Draft PRs #17–#23 (dated snapshot below).
 
-> For a new agent: read this file together with `AGENTS.md`, then inspect Git and the code. Do not use a stale local `main` as the base; fetch and branch from `origin/main`. This document covers the post-D18 state, the PR #14 integration base, D-16 on `main`, and the D-22 Draft-PR work; if HEAD has moved, `git log` and CI are authoritative.
+> For a new agent: read this file together with `AGENTS.md`, then inspect Git and the code. Do not use a stale local `main` as the base; fetch and branch from `origin/main`. This document covers the post-D18 state, the PR #14 integration base, D-16 and D-22 on `main`, and the 2026-10-31 P3 Draft-PR batch; if HEAD has moved, `git log` and CI are authoritative.
 
 ---
 
@@ -187,7 +187,7 @@ M5C delivered **extraction rules**, not OCR accuracy: the default OCR model rema
   - Unexpected cells (out-of-shape, duplicate, non-int coords) = extra with detailed issues
 - **Report (`report.py`):** Markdown with per-doc tables, aggregates, worst documents, error examples, conventions, provenance caveat
 
-Malformed evaluation inputs (D-22): the pre-D-22 behavior let non-dict line items/cells or missing structural keys surface as tracebacks instead of clean CLI errors. D-22 input validation is implemented in its Draft PR; check the live PR and current `main` HEAD for integration status.
+Malformed evaluation inputs (D-22): the pre-D-22 behavior let non-dict line items/cells or missing structural keys surface as tracebacks instead of clean CLI errors. D-22 input validation is merged on `main` (PR #16, merge commit `4d01e78`).
 
 ---
 
@@ -316,7 +316,7 @@ At the post-D18 release checkpoint (2026-10-27), main SHA `130f32207e316330cba15
 | **Batch UI shows the last document** | There is no full batch navigator in the results panel |
 | **CSV UTF-8 without BOM** | Excel on Windows may display Vietnamese text incorrectly (D-21) |
 | **Long single-export filenames** | A very long stem can lose its extension at the 100-character download-header cap; batch ZIP is safe |
-| **Remaining audit defects** | D-16 is integrated on `main` (PR #15); D-22's input validation is implemented in its Draft PR (check the live PR and current `main` HEAD); other P3 items remain; revalidate against current code before starting |
+| **Remaining audit defects** | D-16 (PR #15) and D-22 (PR #16) are integrated on `main` @ `4d01e78`; the remaining P3 items are the open Draft PRs #17–#23 (2026-10-31 snapshot — check live state); revalidate against current code before starting |
 | **Local-only** | 127.0.0.1, no CORS, no auth; do not expose |
 
 ---

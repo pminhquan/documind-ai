@@ -24,10 +24,11 @@ HEAD.
 [40843248171](https://github.com/pminhquan/documind-ai/actions/runs/40843248171)).
 D-16's short-receipt line-item extraction is integrated on `main`.
 
-**D-22 / Draft PR:** evaluation-input validation is implemented in its
-Draft PR; check the live PR and current `main` HEAD for integration
-status. After D-22 integration, relevant P3 audit items are the next
-engineering work.
+**D-22 merge checkpoint:** evaluation-input validation is merged into
+`main` via PR #16 (merge commit
+`4d01e78ec95d58f3b7ca2113da08489e8ec1092d`); do not reimplement it. The
+relevant P3 audit follow-ups are the open Draft PRs #17–#23 (see
+`HANDOFF.md` for the dated snapshot of their state).
 
 **Ground rules:** quality over quantity; no invented benchmarks or
 accuracy claims; real-document evaluation stays pending until
@@ -51,7 +52,7 @@ deployment in the current scope.
 | M5D — performance baseline | ✅ Complete (synthetic/local) | `reports/benchmark-local.md`; runtime numbers, not accuracy |
 | Post-audit regression fixes | ✅ Integrated | P1/P2 audit fixes, D-17, D-19, XLSX title safety |
 | D-16 — short-receipt line items | ✅ Merged | PR #15 merge commit `231cd9`; headerless extraction integrated and tested |
-| D-22 — malformed eval inputs | 🟡 Implemented in Draft PR | Structural validation for prediction/ground-truth data; check the live PR and current `main` HEAD for integration status |
+| D-22 — malformed eval inputs | ✅ Merged (PR #16) | Structural validation for prediction/ground-truth data; merge commit `4d01e78` on `main` |
 | M4B Phase 2 — real-document evaluation | 🔲 Pending | Blocked on privacy-cleared, manually annotated data |
 | M3B — borderless tables | 🔲 Deferred | Model-based structure recognition; later milestone |
 
@@ -198,10 +199,10 @@ removed. Git history retains the old plans if needed.
 1. Inspect Git: `git status --short`, `git branch --show-current`,
    `git fetch origin`, `git rev-parse origin/main`.
 2. Read `AGENTS.md` and `HANDOFF.md` before editing.
-3. Check live Git: D-16 is integrated on `main` (PR #15); do not
-   reimplement it. D-22's input validation is implemented in its Draft
-   PR; check live status. After D-22 integration, relevant P3 audit
-   items are next.
+3. Check live Git: D-16 (PR #15) and D-22 (PR #16) are integrated on
+   `main`; do not reimplement them. The P3 audit follow-ups live in
+   open Draft PRs — read `HANDOFF.md` for their dated snapshot before
+   assuming any status.
 4. Base new work on the latest verified `origin/main`, not a stale local
    `main`; prefer a dedicated worktree.
 5. Create a focused branch (`feat/<milestone>-<slug>` or `docs/<slug>`).

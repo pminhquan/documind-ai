@@ -27,9 +27,10 @@ documind-web
   exports, D-21). Data is intact; Excel-on-Windows renders Vietnamese
   incorrectly unless the file is imported explicitly (Data → From
   Text/UTF-8) or opened in LibreOffice. Switching the default to
-  `utf-8-sig` is a recorded owner decision, not a silent change — it
-  would alter the byte output of every export and can upset BOM-sensitive
-  tooling.
+  `utf-8-sig` is a **pending product decision** (no owner approval is
+  recorded yet): it would alter the byte output of every export and can
+  upset BOM-sensitive tooling, so the change must be explicit and
+  reviewed, never silent.
 
 ## Endpoints
 
