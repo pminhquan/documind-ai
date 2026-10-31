@@ -752,10 +752,15 @@ def _parse_item_line(
     amount_tokens = [token for token in line.tokens if _is_money_token(token)]
     non_amount_tokens = [token for token in line.tokens if token not in amount_tokens]
     if len(line.tokens) > 1:
+        # D-31: spans/joined cover ALL tokens. Word-level OCR regions
+        # split "SOAP 2 x 2.50 5.00" into one region per word, and the
+        # bare-integer quantity classifies as a money token — matching
+        # the qty x price pattern only against non-amount words lost
+        # quantity/unit_price on every multi-region row.
         parts: list[str] = []
         spans: list[tuple[int, int, OcrToken]] = []
         offset = 0
-        for token in non_amount_tokens:
+        for token in line.tokens:
             spans.append((offset, offset + len(token.text), token))
             parts.append(token.text)
             offset += len(token.text) + 1

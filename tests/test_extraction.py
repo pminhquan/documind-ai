@@ -473,6 +473,39 @@ class TestMergedAmountRows:
         assert result.invoice.total is None
 
 
+class TestWordLevelQtyPrice:
+    """D-31: word-level tokenization (one OCR region per word) splits
+    `SOAP 2 x 2.50 5.00` into five regions; the bare-integer quantity
+    classified as a money token, so the qty x price pattern never matched
+    across regions and quantity/unit_price were lost."""
+
+    @staticmethod
+    def _document():
+        return ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("SOAP", 10), ("2", 70), ("x", 100), ("2.50", 130), ("5.00", 210)],
+            [("TOTAL: 5.00", 10)],
+        ])
+
+    def test_word_level_qty_price_and_total(self):
+        result = extract(self._document(), source="t")
+        assert [
+            (i.description, i.quantity, i.unit_price, i.line_total)
+            for i in result.invoice.line_items
+        ] == [("SOAP", Decimal("2"), Decimal("2.50"), Decimal("5.00"))]
+        assert result.invoice.total == Decimal("5.00")
+
+    def test_word_level_provenance_points_at_value_tokens(self):
+        result = extract(self._document(), source="t")
+        prov = result.provenance
+        assert prov["line_items[0].quantity"].text == "2"
+        assert prov["line_items[0].unit_price"].text == "2.50"
+        assert prov["line_items[0].line_total"].text == "5.00"
+        assert prov["line_items[0].description"].text == "SOAP"
+
+
 class TestHeaderFieldRobustness:
     """Regression: optional label groups grabbed the next word on
     header lines ("Invoice Date: ..." -> "Date") and stopped the scan
