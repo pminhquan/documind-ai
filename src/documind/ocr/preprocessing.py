@@ -36,7 +36,10 @@ def prepare_image(path: Path) -> Iterator[Path]:
     try:
         with Image.open(path) as image:
             image.convert("RGB").save(temp_name, format="PNG")
-    except OSError as exc:
+    except Exception as exc:
+        # Broad cleanup (D-33): conversion failures are not limited to
+        # OSError — e.g. PIL's DecompressionBombError — and the temp PNG
+        # must never leak on any failure path.
         os.unlink(temp_name)
         raise PreprocessingError(
             f"Cannot convert image '{path}' to RGB: {exc}"
