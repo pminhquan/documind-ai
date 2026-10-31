@@ -61,10 +61,13 @@ def _reading_order(members: list[tuple[int, dict]]) -> list[tuple[int, dict]]:
     each visual line.
 
     Regions whose vertical centers differ by more than
-    ``LINE_TOLERANCE`` of the smaller box height start a new line
-    (grouped against the first token of the current line); tokens within
-    a line are ordered by horizontal center. Regions without a usable
-    box keep their original relative order at the end.
+    ``LINE_TOLERANCE`` of the tallest box height seen in the current line
+    or the incoming region start a new line; tokens within a line are
+    ordered by horizontal center. Anchoring on the tallest height (not
+    the first token's) keeps a tiny leading token (e.g. a comma) from
+    shrinking the tolerance and splitting otherwise aligned tokens into
+    separate lines (D-34). Regions without a usable box keep their
+    original relative order at the end.
     """
     boxed: list[tuple[float, float, int, dict]] = []
     unboxed: list[tuple[int, dict]] = []
@@ -86,10 +89,12 @@ def _reading_order(members: list[tuple[int, dict]]) -> list[tuple[int, dict]]:
         line = []
 
     for cy, cx, index, item in boxed:
-        if line and abs(cy - line_cy) > LINE_TOLERANCE * min(line_height, _box_height(item)):
+        height = _box_height(item)
+        if line and abs(cy - line_cy) > LINE_TOLERANCE * max(line_height, height):
             flush()
         if not line:
-            line_cy, line_height = cy, _box_height(item)
+            line_cy = cy
+        line_height = max(line_height, height)
         line.append((cx, index, item))
     flush()
     ordered.extend(unboxed)

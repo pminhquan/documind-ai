@@ -5,6 +5,7 @@ or claims model accuracy — these tests validate the deterministic rules.
 """
 
 import json
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -101,6 +102,11 @@ class TestDateFormats:
             ("Date: 25.10.2026", "2026-10-25"),
             ("Date: 05 Apr 2026", "2026-04-05"),
             ("Date: 10/25/2026", "2026-10-25"),  # month-first fallback
+            ("Date: 25/10/26", "2026-10-25"),  # two-digit year, slash
+            ("Date: 25.10.26", "2026-10-25"),  # D-30: two-digit year, dot
+            ("Date: 25-10-26", "2026-10-25"),  # D-30: two-digit year, dash
+            ("Date: 25.10.68", "2068-10-25"),  # %y pivot: 00-68 -> 2000s
+            ("Date: 25.10.69", "1969-10-25"),  # %y pivot: 69-99 -> 1900s
         ],
     )
     def test_date_normalization(self, date_text, expected):
@@ -111,6 +117,10 @@ class TestDateFormats:
 
     def test_unparseable_date_stays_none(self):
         document = {"items": [{"text": "Date: sometime soon", "box": []}]}
+        assert extract(document).invoice.invoice_date is None
+
+    def test_invalid_two_digit_date_stays_none(self):
+        document = {"items": [{"text": "Date: 32.13.26", "box": []}]}
         assert extract(document).invoice.invoice_date is None
 
 
@@ -297,6 +307,183 @@ class TestMonetarySeparators:
         assert invoice.validation_status == STATUS_OK
 
 
+class TestNegativeAmounts:
+    """D-29: a minus sign is part of the printed value (refund/credit
+    totals, `TOTAL -5.00` must not become `5.00`). Sign binding is
+    conservative, matching the malformed-run discipline: a minus binds
+    when it directly precedes the digits and the preceding character is
+    not a word character (whitespace, line start, or punctuation such as
+    the label colon); a hyphen attached to letters (`A-12.50`) is
+    ambiguous identifier noise and matches nothing instead of a silently
+    reinterpreted value. A spaced minus (`- 5.00`) never binds —
+    intentional: whitespace between sign and digits is OCR noise, and
+    binding it would contradict the direct-precedence rule."""
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("TOTAL -5.00", "-5.00"),
+            ("TOTAL -5,00", "-5.00"),
+            ("TOTAL -1,234.56", "-1234.56"),
+            ("TOTAL -1.234,56", "-1234.56"),
+            ("TOTAL -20.000", "-20000"),
+            ("TOTAL -5.00đ", "-5.00"),
+            ("TOTAL:-5.00", "-5.00"),  # review: tight label colon
+            ("TOTAL: -5,00", "-5.00"),
+            ("TOTAL 5.00", "5.00"),  # positive unchanged
+            ("TOTAL - 5.00", "5.00"),  # spaced minus never binds
+        ],
+    )
+    def test_negative_merged_totals_keep_sign(self, text, expected):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text=text, box=())])
+        assert _rightmost_amount(line) == Decimal(expected)
+
+    def test_separate_negative_token_keeps_sign(self):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text="TOTAL", box=()),
+                                  OcrToken(index=1, text="-5.00", box=())])
+        assert _rightmost_amount(line) == Decimal("-5.00")
+
+    def test_letter_attached_hyphen_amount_is_not_reinterpreted(self):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text="SKU A-12.50", box=())])
+        assert _rightmost_amount(line) is None
+
+    def test_negative_total_end_to_end(self):
+        document = {"items": [
+            {"text": "MINI MART", "box": []},
+            {"text": "TOTAL -5.00", "box": []},
+        ]}
+        assert extract(document).invoice.total == Decimal("-5.00")
+
+    def test_negative_total_provenance_keeps_region(self):
+        document = {"items": [
+            {"text": "MINI MART", "box": []},
+            {"text": "TOTAL -5.00", "box": []},
+        ]}
+        result = extract(document)
+        assert result.provenance["total"].text == "TOTAL -5.00"
+
+
+class TestTightLabelAmounts:
+    """Review regression on the D-29 work: the sign precondition
+    `(?<!\\S)` applied to every merged match, so amounts printed
+    directly after a label colon (`TOTAL:25.00`, no space) stopped
+    matching at all. Unsigned amounts only reject digit/`.`/`,` prefixes
+    and identifier hyphens; the minus binds after any non-word context."""
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("TOTAL:25.00", "25.00"),
+            ("TOTAL: 25.00", "25.00"),
+            ("SUBTOTAL:12.50", "12.50"),
+            ("TOTAL:1.234,56", "1234.56"),
+            ("TOTAL: 1,234.56", "1234.56"),
+            ("TOTAL:25.000", "25000"),  # Vietnamese grouping, no space
+            ("TOTAL:25.00đ", "25.00"),
+            ("Invoice No: A-123", None),  # id digits stay non-amounts
+        ],
+    )
+    def test_merged_amount_shapes(self, text, expected):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text=text, box=())])
+        amount = _rightmost_amount(line)
+        assert amount == (Decimal(expected) if expected is not None else None)
+
+    def test_tight_label_total_end_to_end(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL:25.00", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal("25.00")
+
+    def test_vietnamese_tight_label_total_end_to_end(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TỔNG CỘNG:25.000", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal(25000)
+
+    def test_tight_label_negative_total_end_to_end(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL:-5.00", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal("-5.00")
+
+
+class TestDeterministicMonthNames:
+    """D-20: textual month names come from an explicit English table, so
+    parsing never depends on the host LC_TIME or on which locale happened
+    to be active when `_strptime` was first imported."""
+
+    @pytest.mark.parametrize(
+        "abbr, month",
+        [
+            ("Jan", 1), ("feb", 2), ("MAR", 3), ("Apr", 4), ("May", 5),
+            ("Jun", 6), ("Jul", 7), ("Aug", 8), ("Sep", 9), ("Oct", 10),
+            ("Nov", 11), ("Dec", 12),
+        ],
+    )
+    def test_all_abbreviations_case_insensitive(self, abbr, month):
+        from documind.extraction.parsing import parse_date
+
+        assert parse_date(f"05 {abbr} 2026") == date(2026, month, 5)
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("Date: 05 April 2026", "2026-04-05"),
+            ("Date: 01 September 2026", "2026-09-01"),
+            ("Date: 25 December 2026", "2026-12-25"),
+        ],
+    )
+    def test_full_month_names(self, text, expected):
+        document = {"items": [{"text": "MINI MART", "box": []},
+                              {"text": text, "box": []}]}
+        result = extract(document)
+        assert result.invoice.invoice_date.isoformat() == expected
+
+    def test_unknown_month_stays_none(self):
+        from documind.extraction.parsing import parse_date
+
+        assert parse_date("05 Xyz 2026") is None
+
+    def test_month_names_do_not_consult_strptime_locale_data(self, monkeypatch):
+        """No date path may reach the locale-sensitive %b/%B formats whose
+        result depends on the host LC_TIME (D-20)."""
+        import _strptime
+
+        real_strptime = _strptime._strptime
+
+        def guard(data_string, fmt, **kwargs):
+            if "%b" in fmt or "%B" in fmt:
+                raise AssertionError(f"locale-sensitive format used: {fmt}")
+            return real_strptime(data_string, fmt, **kwargs)
+
+        monkeypatch.setattr(_strptime, "_strptime", guard)
+        from documind.extraction.parsing import parse_date
+
+        assert parse_date("05 Oct 2026") == date(2026, 10, 5)
+        assert parse_date("25.10.2026") == date(2026, 10, 25)  # numeric path intact
+
+
 class TestMissingBoxes:
     def test_extraction_without_boxes(self):
         result = extract(load_fixture("no_boxes.json"))
@@ -373,6 +560,27 @@ class TestEdgeCases:
         path.write_text("[]", encoding="utf-8")
         with pytest.raises(OcrInputError, match="must be an object"):
             load_ocr_document(path)
+
+    def test_oversized_ocr_json_rejected_at_load(self, tmp_path, monkeypatch):
+        """D-28: MAX_OCR_JSON_BYTES is enforced at the load boundary."""
+        import documind.extraction.extractor as extractor_module
+
+        monkeypatch.setattr(extractor_module, "MAX_OCR_JSON_BYTES", 16)
+        path = tmp_path / "big.json"
+        path.write_text(json.dumps({"items": [{"text": "x" * 64}]}),
+                        encoding="utf-8")
+        with pytest.raises(OcrInputError, match="input limit"):
+            load_ocr_document(path)
+
+    def test_ocr_json_at_exact_limit_is_accepted(self, tmp_path, monkeypatch):
+        import documind.extraction.extractor as extractor_module
+
+        monkeypatch.setattr(extractor_module, "MAX_OCR_JSON_BYTES", 16)
+        path = tmp_path / "exact.json"
+        content = '{"items": []}   '  # exactly 16 bytes
+        assert len(content.encode("utf-8")) == 16
+        path.write_text(content, encoding="utf-8")
+        assert load_ocr_document(path) == {"items": []}
 
     def test_multi_line_product_description(self):
         result = extract(load_fixture("multiline_description.json"))
@@ -473,6 +681,93 @@ class TestMergedAmountRows:
         assert result.invoice.total is None
 
 
+class TestWordLevelQtyPrice:
+    """D-31: word-level tokenization (one OCR region per word) splits
+    `SOAP 2 x 2.50 5.00` into five regions; the bare-integer quantity
+    classified as a money token, so the qty x price pattern never matched
+    across regions and quantity/unit_price were lost."""
+
+    @staticmethod
+    def _document():
+        return ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("SOAP", 10), ("2", 70), ("x", 100), ("2.50", 130), ("5.00", 210)],
+            [("TOTAL: 5.00", 10)],
+        ])
+
+    def test_word_level_qty_price_and_total(self):
+        result = extract(self._document(), source="t")
+        assert [
+            (i.description, i.quantity, i.unit_price, i.line_total)
+            for i in result.invoice.line_items
+        ] == [("SOAP", Decimal(2), Decimal("2.50"), Decimal("5.00"))]
+        assert result.invoice.total == Decimal("5.00")
+
+    def test_word_level_provenance_points_at_value_tokens(self):
+        result = extract(self._document(), source="t")
+        prov = result.provenance
+        assert prov["line_items[0].quantity"].text == "2"
+        assert prov["line_items[0].unit_price"].text == "2.50"
+        assert prov["line_items[0].line_total"].text == "5.00"
+        assert prov["line_items[0].description"].text == "SOAP"
+
+
+class TestQtyOnlyRowNoTotal:
+    """Review finding on the D-31 work: `SOAP | 2 | x | 2.50` without a
+    printed line total mislabeled the unit-price token as the line total
+    (and the validator then flagged the invented qty x price mismatch as
+    `invalid`). A line total must come from printed text outside the
+    qty x price pattern; it is never derived from quantity x unit price."""
+
+    @staticmethod
+    def _document(rows):
+        return ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            *rows,
+            [("TOTAL:2.50", 10)],
+        ])
+
+    def test_qty_only_row_leaves_line_total_null(self):
+        result = extract(self._document(
+            [[("SOAP", 10), ("2", 70), ("x", 100), ("2.50", 130)]]),
+            source="t")
+        item = result.invoice.line_items[0]
+        assert (item.description, item.quantity, item.unit_price,
+                item.line_total) == ("SOAP", Decimal(2), Decimal("2.50"), None)
+        # The invented line total made the validator report a fake
+        # arithmetic mismatch; with no printed total there is nothing to
+        # check and the document is simply complete.
+        assert result.invoice.validation_status == STATUS_OK
+
+    def test_qty_only_provenance_has_no_line_total(self):
+        result = extract(self._document(
+            [[("SOAP", 10), ("2", 70), ("x", 100), ("2.50", 130)]]),
+            source="t")
+        assert "line_items[0].line_total" not in result.provenance
+
+    def test_row_with_printed_total_unchanged(self):
+        result = extract(self._document(
+            [[("SOAP", 10), ("2", 70), ("x", 100), ("2.50", 130),
+              ("5.00", 210)]]), source="t")
+        item = result.invoice.line_items[0]
+        assert item.line_total == Decimal("5.00")
+
+    def test_mixed_rows_keep_printed_totals(self):
+        result = extract(self._document([
+            [("CAFE", 10), ("2", 70), ("x", 100), ("2.50", 130), ("5.00", 210)],
+            [("MILK", 10), ("1", 70), ("x", 100), ("2.50", 130)],
+        ]), source="t")
+        assert [(i.description, i.line_total)
+                for i in result.invoice.line_items] == [
+            ("CAFE", Decimal("5.00")),
+            ("MILK", None),
+        ]
+
+
 class TestHeaderFieldRobustness:
     """Regression: optional label groups grabbed the next word on
     header lines ("Invoice Date: ..." -> "Date") and stopped the scan
@@ -503,6 +798,58 @@ class TestHeaderFieldRobustness:
     def test_standalone_dong_sign_is_currency(self):
         result = extract(ocr_doc([[("Gia: 5.000 đ", 10)]]))
         assert result.invoice.currency == "VND"
+
+
+class TestHeaderProvenance:
+    """D-32: header-field provenance must point at the OCR region that
+    holds the captured value, not at the label token, when a line splits
+    label and value across regions."""
+
+    def test_invoice_number_provenance_points_at_value_token(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Receipt", 10), ("#:", 90), ("00001234", 140)],
+            [("Date: 25/10/2026", 10)],
+            [("TOTAL 9.57", 10)],
+        ]), source="t")
+        assert result.invoice.invoice_number == "00001234"
+        assert result.provenance["invoice_number"].text == "00001234"
+
+    def test_date_provenance_points_at_date_token(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice", 10), ("No: A-123", 120)],
+            [("Date:", 10), ("25/10/2026", 90)],
+            [("TOTAL 9.57", 10)],
+        ]), source="t")
+        assert result.invoice.invoice_date.isoformat() == "2026-10-25"
+        assert result.provenance["invoice_date"].text == "25/10/2026"
+
+    def test_labelled_supplier_provenance_points_at_value_token(self):
+        result = extract(ocr_doc([
+            [("TEN CUA HANG:", 10), ("MINI MART", 150)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL 9.57", 10)],
+        ]), source="t")
+        assert result.invoice.supplier == "MINI MART"
+        assert result.provenance["supplier"].text == "MINI MART"
+
+    def test_inline_label_value_keeps_region_provenance(self):
+        """The inline shape (`Receipt #: 00001234` in one region) is
+        unaffected: the single region both is the label and holds the
+        value."""
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Receipt #: 00001234", 10)],
+            [("Date: 25/10/2026", 10)],
+            [("TOTAL 9.57", 10)],
+        ]), source="t")
+        assert result.invoice.invoice_number == "00001234"
+        assert result.provenance["invoice_number"].text == "Receipt #: 00001234"
 
 
 class TestShortHeaderlessReceipts:

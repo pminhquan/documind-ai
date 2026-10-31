@@ -60,7 +60,7 @@ Command: `documind-extract <ocr-json-path> -o <invoice-json-path>`.
 | 2 | Line grouping | `layout.group_lines` | Tokens whose vertical ranges overlap ≥ 50 % of the smaller height share a visual row; inside a row, order by `x0`; row order follows OCR reading order. Tokens without a box become single-token lines. |
 | 3 | Supplier | `extract_supplier` | First of the top 3 lines that is not label-prefixed (`receipt/invoice/date/currency/tel/...`), contains no date and no amount. |
 | 4 | Invoice number | `extract_invoice_number` | First match of `(?i)\b(receipt|invoice) [#+no]?\s*[:#]?\s*([A-Za-z0-9/-]{3,})`. |
-| 5 | Date | `extract_date` | Parse the first date token on a line containing "date"; otherwise the first parseable date token in the document. Formats tried in order: `%Y-%m-%d, %Y/%m/%d, %d/%m/%Y, %d-%m-%Y, %d.%m.%Y, %m/%d/%Y, %m-%d-%Y, %d %b %Y, %d %B %Y, %d/%m/%y` — day-first before month-first, so `05/04/2026` → 5 April. |
+| 5 | Date | `extract_date` | Parse the first date token on a line containing "date"; otherwise the first parseable date token in the document. Numeric formats tried in order: `%Y-%m-%d, %Y/%m/%d, %d/%m/%Y, %d-%m-%Y, %d.%m.%Y, %d-%m-%y, %d.%m.%y, %m/%d/%Y, %m-%d-%Y, %d/%m/%y` — day-first before month-first, so `05/04/2026` → 5 April. Two-digit years follow the `%y` pivot (`00-68` → 2000-2068, `69-99` → 1969-1999). Textual month names (`25 Oct 2026`, `25 October 2026`) resolve through an explicit English month table — never the locale-sensitive `%b`/`%B`, so parsing is independent of the host `LC_TIME`. |
 | 6 | Currency | `extract_currency` | `currency: XXX` label first; else symbol map `$→USD, €→EUR, £→GBP, đ→VND`. |
 | 7 | Line items | `extract_line_items` | Explicit header (`QTY...PRICE` / `SỐ LƯỢNG...ĐƠN GIÁ`) is authoritative: items start on the next row. Without a header, the region starts at the first confirmed product row before a summary row (see below). Rows carry `description ... qty x price ... line_total`; amount-free rows inside the region are description continuations (multi-line product names). |
 | 8 | Summary amounts | `extract_summary` | Rows matching `discount / subtotal / tax|vat / cash|paid|payment / change / total`; value = rightmost money token on the row. Multiple `TOTAL` rows: keep the bottom-most; differing values or duplicate labels raise an `ambiguous:` note (review). |
@@ -238,6 +238,15 @@ accuracy remains pending labeled data.
   thousands-grouped `20.000` all match completely) and uses lookarounds
   so a malformed run (`12.34.56.78`) matches **nothing** instead of a
   substring — a value that cannot be parsed reliably stays `null`.
+- A single leading minus is part of the printed value (refund/credit
+  totals, D-29): `TOTAL -5.00` and the tight-label `TOTAL:-5.00` parse
+  as `-5.00`. The sign binds when it directly precedes the digits and
+  the preceding character is not a word character — whitespace, line
+  start, or punctuation such as the label colon; `A-12.50` (hyphen
+  attached to letters) is identifier noise and matches nothing rather
+  than a silently reinterpreted value. A spaced minus (`- 5.00`) never
+  binds — intentional: whitespace between sign and digits is OCR noise,
+  and binding it would contradict the direct-precedence rule.
 - When a row holds several candidates, the **rightmost complete match**
   wins.
 - A bare token qualifies as money only with an explicit 2-decimal

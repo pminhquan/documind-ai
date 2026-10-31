@@ -249,6 +249,15 @@ MAX_OCR_JSON_BYTES = 50 * 1024 * 1024
 def load_ocr_document(path: str | Path) -> dict:
     """Load and structurally validate a saved OCR JSON document."""
     document_path = Path(path)
+    # D-28: input-size guard at the load boundary — reject absurd inputs
+    # before reading/parsing them instead of silently accepting them
+    # (same philosophy as the OCR pipeline's image size limit).
+    size = document_path.stat().st_size
+    if size > MAX_OCR_JSON_BYTES:
+        raise OcrInputError(
+            f"OCR JSON exceeds the {MAX_OCR_JSON_BYTES // (1024 * 1024)} MB "
+            f"input limit ({size} bytes): '{document_path}'"
+        )
     raw = document_path.read_text(encoding="utf-8")
     try:
         document = json.loads(raw)
@@ -326,6 +335,17 @@ def _amount_token(line: VisualLine, amount_text: str) -> OcrToken | None:
         if amount_text in token.text:
             return token
     return None
+
+
+def _token_containing(line: VisualLine, value: str) -> OcrToken:
+    """First token whose text contains ``value`` (D-32): header provenance
+    must point at the region holding the captured value, not at the label
+    token. Falls back to the line's first token when the value spans or
+    escapes token text (e.g. after diacritic folding)."""
+    for token in line.tokens:
+        if value in token.text:
+            return token
+    return line.tokens[0]
 
 
 def _merged_trailing_amount(text: str) -> tuple[str, Decimal, str] | None:
@@ -512,7 +532,7 @@ class _Extractor:
                 # without a word character and keep scanning.
                 if re.search(r"\w", value):
                     self.invoice.supplier = value
-                    self._record("supplier", line.tokens[0])
+                    self._record("supplier", _token_containing(line, value))
                     return
             if parse_date(line.text) or _rightmost_amount(line) is not None:
                 continue
@@ -533,7 +553,8 @@ class _Extractor:
             )
             if match:
                 self.invoice.invoice_number = match.group(1)
-                self._record("invoice_number", line.tokens[0])
+                self._record("invoice_number",
+                             _token_containing(line, match.group(1)))
                 return
 
     def extract_date(self, lines: list[VisualLine]) -> None:
@@ -544,7 +565,15 @@ class _Extractor:
             parsed = parse_date(line.text)
             if parsed is not None:
                 self.invoice.invoice_date = parsed
-                self._record("invoice_date", line.tokens[0])
+                # D-32: the date value may live in a value-only region;
+                # re-parse per token to locate it, falling back to the
+                # label-bearing region when the value spans tokens.
+                token = next(
+                    (item for item in line.tokens
+                     if parse_date(item.text) == parsed),
+                    line.tokens[0],
+                )
+                self._record("invoice_date", token)
                 return
 
     def extract_currency(self, lines: list[VisualLine]) -> None:
@@ -752,10 +781,15 @@ def _parse_item_line(
     amount_tokens = [token for token in line.tokens if _is_money_token(token)]
     non_amount_tokens = [token for token in line.tokens if token not in amount_tokens]
     if len(line.tokens) > 1:
+        # D-31: spans/joined cover ALL tokens. Word-level OCR regions
+        # split "SOAP 2 x 2.50 5.00" into one region per word, and the
+        # bare-integer quantity classifies as a money token — matching
+        # the qty x price pattern only against non-amount words lost
+        # quantity/unit_price on every multi-region row.
         parts: list[str] = []
         spans: list[tuple[int, int, OcrToken]] = []
         offset = 0
-        for token in non_amount_tokens:
+        for token in line.tokens:
             spans.append((offset, offset + len(token.text), token))
             parts.append(token.text)
             offset += len(token.text) + 1
@@ -813,8 +847,15 @@ def _parse_item_line(
     item = LineItem(description=description, quantity=quantity, unit_price=unit_price)
     if amount_tokens:
         total_token = amount_tokens[-1]
-        item.line_total = parse_amount(total_token.text)
-        prov["line_total"] = total_token
+        # Review (D-31): on a row without a printed total ("SOAP 2 x
+        # 2.50") the rightmost money token IS the unit price inside the
+        # qty x price pattern — mislabeling it as the line total also
+        # made the validator report a fake arithmetic mismatch. Pattern
+        # operands never count as the total, and total = qty x price is
+        # never derived: totals come from printed text only.
+        if total_token is not prov["quantity"] and total_token is not prov["unit_price"]:
+            item.line_total = parse_amount(total_token.text)
+            prov["line_total"] = total_token
     elif qty_match:
         # Merged single-token row like "SOAP 2 x 2.50 5.00": the line
         # total is the rightmost complete money token after the
