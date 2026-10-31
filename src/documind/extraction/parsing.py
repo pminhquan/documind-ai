@@ -74,13 +74,16 @@ MONEY_TOKEN_RE = re.compile(
 # separators (consistent with the decimal branch), and bare integers
 # need >= 2 digits so a stray single digit after the amount ("97.20 0")
 # cannot win the rightmost-match rule. A single leading minus binds only
-# after whitespace/line start and directly before the digits (D-29) — a
-# hyphen attached to letters matches nothing. Trade-off: a bare
-# multi-digit run such as a year can match when the fallback fires —
-# summary/item rows are amount-dominated text, and the arithmetic
-# validation surfaces a wrong value instead of it appearing silently.
+# when it directly precedes the digits and the preceding character is
+# not a word character — whitespace, line start, or punctuation such as
+# the label colon ("TOTAL:-5.00"); a hyphen attached to letters
+# ("A-12.50") is identifier noise and matches nothing. A spaced minus
+# ("- 5.00") never binds. Trade-off: a bare multi-digit run such as a
+# year can match when the fallback fires — summary/item rows are
+# amount-dominated text, and the arithmetic validation surfaces a wrong
+# value instead of it appearing silently.
 MERGED_MONEY_RE = re.compile(
-    r"(?<![\d.,])(?<!\S)-?(?:\d+(?:[.,\s]\d{3})*[.,]\d{2}"
+    r"(?<![\d.,])(?<!\w-)(?:(?<!\w)-)?(?:\d+(?:[.,\s]\d{3})*[.,]\d{2}"
     r"|\d{1,3}(?:[.,\s]\d{3})+|\d{2,})(?![\d.,])"
 )
 

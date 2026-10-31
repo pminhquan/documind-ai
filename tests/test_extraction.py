@@ -311,9 +311,13 @@ class TestNegativeAmounts:
     """D-29: a minus sign is part of the printed value (refund/credit
     totals, `TOTAL -5.00` must not become `5.00`). Sign binding is
     conservative, matching the malformed-run discipline: a minus binds
-    when it directly precedes the digits after whitespace or line start;
-    a hyphen attached to letters (`A-12.50`) is ambiguous noise and
-    matches nothing instead of a silently reinterpreted value."""
+    when it directly precedes the digits and the preceding character is
+    not a word character (whitespace, line start, or punctuation such as
+    the label colon); a hyphen attached to letters (`A-12.50`) is
+    ambiguous identifier noise and matches nothing instead of a silently
+    reinterpreted value. A spaced minus (`- 5.00`) never binds —
+    intentional: whitespace between sign and digits is OCR noise, and
+    binding it would contradict the direct-precedence rule."""
 
     @pytest.mark.parametrize(
         "text, expected",
@@ -324,6 +328,8 @@ class TestNegativeAmounts:
             ("TOTAL -1.234,56", "-1234.56"),
             ("TOTAL -20.000", "-20000"),
             ("TOTAL -5.00đ", "-5.00"),
+            ("TOTAL:-5.00", "-5.00"),  # review: tight label colon
+            ("TOTAL: -5,00", "-5.00"),
             ("TOTAL 5.00", "5.00"),  # positive unchanged
             ("TOTAL - 5.00", "5.00"),  # spaced minus never binds
         ],
@@ -364,6 +370,62 @@ class TestNegativeAmounts:
         ]}
         result = extract(document)
         assert result.provenance["total"].text == "TOTAL -5.00"
+
+
+class TestTightLabelAmounts:
+    """Review regression on the D-29 work: the sign precondition
+    `(?<!\\S)` applied to every merged match, so amounts printed
+    directly after a label colon (`TOTAL:25.00`, no space) stopped
+    matching at all. Unsigned amounts only reject digit/`.`/`,` prefixes
+    and identifier hyphens; the minus binds after any non-word context."""
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("TOTAL:25.00", "25.00"),
+            ("TOTAL: 25.00", "25.00"),
+            ("SUBTOTAL:12.50", "12.50"),
+            ("TOTAL:1.234,56", "1234.56"),
+            ("TOTAL: 1,234.56", "1234.56"),
+            ("TOTAL:25.000", "25000"),  # Vietnamese grouping, no space
+            ("TOTAL:25.00đ", "25.00"),
+            ("Invoice No: A-123", None),  # id digits stay non-amounts
+        ],
+    )
+    def test_merged_amount_shapes(self, text, expected):
+        from documind.extraction.extractor import _rightmost_amount
+        from documind.extraction.layout import OcrToken, VisualLine
+
+        line = VisualLine(tokens=[OcrToken(index=0, text=text, box=())])
+        amount = _rightmost_amount(line)
+        assert amount == (Decimal(expected) if expected is not None else None)
+
+    def test_tight_label_total_end_to_end(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL:25.00", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal("25.00")
+
+    def test_vietnamese_tight_label_total_end_to_end(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TỔNG CỘNG:25.000", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal(25000)
+
+    def test_tight_label_negative_total_end_to_end(self):
+        result = extract(ocr_doc([
+            [("MINIMART", 10)],
+            [("123 Street", 10)],
+            [("Invoice No: A-123", 10)],
+            [("TOTAL:-5.00", 10)],
+        ]), source="t")
+        assert result.invoice.total == Decimal("-5.00")
 
 
 class TestDeterministicMonthNames:

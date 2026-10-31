@@ -239,11 +239,14 @@ accuracy remains pending labeled data.
   so a malformed run (`12.34.56.78`) matches **nothing** instead of a
   substring — a value that cannot be parsed reliably stays `null`.
 - A single leading minus is part of the printed value (refund/credit
-  totals, D-29): `TOTAL -5.00` parses as `-5.00`. The sign binds only
-  when it directly precedes the digits after whitespace/line start;
-  `A-12.50` (hyphen attached to letters) is ambiguous noise and matches
-  nothing rather than a silently reinterpreted value. A spaced minus
-  (`- 5.00`) never binds.
+  totals, D-29): `TOTAL -5.00` and the tight-label `TOTAL:-5.00` parse
+  as `-5.00`. The sign binds when it directly precedes the digits and
+  the preceding character is not a word character — whitespace, line
+  start, or punctuation such as the label colon; `A-12.50` (hyphen
+  attached to letters) is identifier noise and matches nothing rather
+  than a silently reinterpreted value. A spaced minus (`- 5.00`) never
+  binds — intentional: whitespace between sign and digits is OCR noise,
+  and binding it would contradict the direct-precedence rule.
 - When a row holds several candidates, the **rightmost complete match**
   wins.
 - A bare token qualifies as money only with an explicit 2-decimal
