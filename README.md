@@ -416,10 +416,13 @@ reports/             evaluation results, benchmark, audits (m3a, m4a,
   reconstructed, merged bare integers stay ambiguous, and a VAT token on
   a metadata row can still be read as a monetary tax. Real-world OCR
   accuracy for these layouts is unvalidated.
-- Remaining P3 audit items (other small defects) are tracked in
-  [HANDOFF.md](HANDOFF.md) and the [baseline audit](reports/audits/2026-10-26-baseline-audit.md).
-  D-22's evaluation-input validation is implemented in its Draft PR;
-  check the live PR and current `main` HEAD for integration status.
+- The 2026-10-26 audit findings are closed: D-22's evaluation-input
+  validation merged via PR #16, and the remaining P3 batch (signed
+  monetary values, two-digit-year and locale-independent dates, dataset
+  lifecycle guards, word-level qty × price, header provenance, table
+  line tolerance, temp-file safety, OCR JSON size guard) via PRs
+  #17–#23 on 2026-10-31. See [HANDOFF.md](HANDOFF.md) and the
+  [baseline audit](reports/audits/2026-10-26-baseline-audit.md).
 
 ## Roadmap
 
@@ -438,13 +441,12 @@ reports/             evaluation results, benchmark, audits (m3a, m4a,
 - ~~**M5D:** synthetic/local performance baseline and benchmark tooling~~ ✓
 - ~~**D-16:** short-receipt line-item extraction~~ — merged via PR #15
   (merge commit `231cd9`)
-- **D-22:** malformed evaluation-input handling — implemented in its
-  Draft PR; check the live PR and current `main` HEAD for integration
-  status
-- **Remaining P3 audit items** (pending, prioritized in HANDOFF; next
-  engineering task after D-22 integration)
-- **M4B Phase 2:** evaluate on privacy-cleared, manually annotated real
-  documents (pending data)
+- ~~**D-22:** malformed evaluation-input handling~~ — merged via PR #16
+  (merge commit `4d01e78`)
+- ~~**Remaining P3 audit items**~~ — merged via PRs #17–#23 (2026-10-31;
+  merge record in HANDOFF)
+- **M4B Phase 2** (next, blocked until privacy-cleared, manually
+  annotated real data exists): evaluate on real documents
 - **Vietnamese OCR benchmarking:** compare `lang="vi"` vs `lang="en"` on
   real data (pending data)
 - **M3B:** borderless table recognition (model-based, deferred)
