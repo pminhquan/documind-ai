@@ -6,6 +6,20 @@
 
 **Project state:** M0/M1, M2, M3A, M4A, M4B Phase 1, M5A, M5B (including D-18), M5C extraction rules, and M5D synthetic performance baseline are complete and integrated on `main`. M4B Phase 2 remains pending real labeled data.
 
+**2026-10-31 checkpoint (post-Windows-reinstall recovery + P3 audit batch):** verified `origin/main` @ `4d01e78ec95d58f3b7ca2113da08489e8ec1092d` (PR #16 merge, D-22 integrated; 643 tests green locally on a rebuilt Python 3.12.10 venv). The remaining reproducible P3 audit items are implemented in **seven open Draft PRs** targeting `main` (review/merge order: #17 → #18 → #19 → #20 → #21 → #22 → #23; all CI-green on their exact head SHA):
+
+| PR | Branch / head | Defect | Summary |
+|----|---------------|--------|---------|
+| #17 | `fix/d23-d24-dataset-lifecycle` @ `92424c5` | D-23, D-24 | `add` refuses uninitialized datasets; `validate` flags manifest/annotation drift (CI [41184862148](https://github.com/pminhquan/documind-ai/actions/runs/41184862148)) |
+| #18 | `fix/d29-d30-d20-signed-amounts-dates` @ `90984ce` | D-29, D-30, D-20 | signed money tokens; `%d-%m-%y`/`%d.%m.%y`; explicit English month table (no `LC_TIME` dependency) (CI [41185722681](https://github.com/pminhquan/documind-ai/actions/runs/41185722681)) |
+| #19 | `fix/d31-word-level-qty-price` @ `e764dc6` | D-31 | qty × price extraction across word-level OCR regions (CI [41186293559](https://github.com/pminhquan/documind-ai/actions/runs/41186293559)) |
+| #20 | `fix/d32-header-provenance` @ `6bf7e12` | D-32 | header provenance points at the value region, not the label (CI [41186516167](https://github.com/pminhquan/documind-ai/actions/runs/41186516167)) |
+| #21 | `fix/d34-assign-line-tolerance` @ `71d9f7a` | D-34 | reading-order line tolerance anchors on the tallest token (CI [41186716285](https://github.com/pminhquan/documind-ai/actions/runs/41186716285)) |
+| #22 | `fix/d33-temp-cleanup` @ `57a0cd1` | D-33 | temp RGB PNG removed on any conversion failure (CI [41186999690](https://github.com/pminhquan/documind-ai/actions/runs/41186999690)) |
+| #23 | `fix/d28-ocr-json-byte-guard` @ `469879c` | D-28 | 50 MB OCR JSON guard wired at `load_ocr_document`; dead `to_decimal` removed (CI [41187133199](https://github.com/pminhquan/documind-ai/actions/runs/41187133199)) |
+
+Closed as already-resolved or documented without code changes: **D-27** (correction keys use per-File sequential doc ids — no name collisions), **D-25** and **D-26** (documented in `docs/evaluation-spec.md` / `pdf.py` docstring), **D-21** (UTF-8-without-BOM recorded as an explicit owner decision in `docs/web-api.md`), and the evaluation `rows × columns` resource question (documented no-cap rationale in `docs/evaluation-spec.md`). None of these PRs are merged; the owner reviews and merges. The recovery session also rebuilt the Windows environment: Python 3.12.10 via winget, repaired `.venv` (packages preserved), Node.js LTS for the frontend gate, and fixed post-reinstall file-ownership (old-SID ACLs) that blocked git/pip writes.
+
 **Dated release checkpoint:** at the post-D18 release checkpoint, main SHA `130f322` had **392 passing pytest tests**; CI run [40439790177](https://github.com/pminhquan/documind-ai/actions/runs/40439790177) completed successfully. This is a historical verified snapshot, not a promise that future HEADs always have 392 tests.
 
 **D-16 / PR #15:** merged into `main` via PR #15 (merge commit `231cd909924f75b4d46816ca028bbdca5b6107ef`, 2026-10-29; 519 tests, CI run [40843248171](https://github.com/pminhquan/documind-ai/actions/runs/40843248171)). The base `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge) did **not** contain D-16. **D-22 / Draft PR:** evaluation-input validation is implemented in its Draft PR; check the live PR and current `origin/main` HEAD for integration status. After D-22 integration, relevant P3 audit items are the next engineering work.
@@ -408,9 +422,9 @@ Documentation changes must still keep `python scripts/verify.py` green.
 
 ## 11. Next Engineering Work
 
-D-16 is integrated on `main` (PR #15, merge commit `231cd9`). D-22's input validation is implemented in its Draft PR; verify the live PR and current `origin/main` HEAD before assuming it is integrated. Once D-22 is integrated, the remaining backlog, in recommended order:
+D-16 (PR #15) and D-22 (PR #16) are integrated on `main` @ `4d01e78`. The reproducible P3 audit items (D-20, D-23, D-24, D-28–D-34 minus D-27) are implemented in open Draft PRs #17–#23 — review and merge those first (order above). Remaining backlog, in recommended order:
 
-1. **Relevant P3 audit items:** revalidate the 2026-10-26 audit against current code; prioritize export/UX/data-integrity items (e.g. D-20 locale-sensitive dates, D-21 CSV BOM, D-23/D-24 dataset lifecycle) over speculative features.
+1. **Merge review of PRs #17–#23** (all independent, based on `4d01e78`; no stacking). After merges, re-run `python scripts/verify.py` on the updated `main`.
 2. **M4B Phase 2 — real-document evaluation:** collect privacy-cleared, manually annotated documents (10–20 pilot: Vietnamese receipts, invoice-style pages, ruled-table pages), onboard via `documind-dataset`, evaluate with provenance `real`, and publish the first honest accuracy report. Data collection/annotation can proceed in parallel with task 1 when data becomes available.
 3. **Vietnamese OCR model/language benchmarking:** compare `lang="vi"` vs `lang="en"` on the real set after M4B Phase 2 evidence; record a model-selection decision before tuning.
 4. **M3B — borderless tables:** deferred; requires a model-based structure recognizer and should follow real-data evidence.
@@ -425,7 +439,8 @@ Do not start a new milestone before its prerequisite data/decision exists. Do no
 - **D-16 merge checkpoint:** `origin/main` @ `231cd909924f75b4d46816ca028bbdca5b6107ef` (PR #15 merged on 2026-10-29; 519 tests; CI run [40843248171](https://github.com/pminhquan/documind-ai/actions/runs/40843248171)).
 - **PR #15 base (historical):** `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge). That base does **not** contain D-16; D-16 was implemented in PR #15 and is now merged at `231cd9`.
 - **PR #13:** merged; the `fix/m5b-pdf-page-level-exports` branch is retained (not deleted).
-- At the release checkpoint there were **no open feature PRs**. Inspect `gh pr list` / `git log origin/main` before starting: history may have moved since this document was written.
+- **D-22 merge checkpoint:** `origin/main` @ `4d01e78ec95d58f3b7ca2113da08489e8ec1092d` (PR #16 merged; 643 tests at that SHA).
+- As of the 2026-10-31 checkpoint there are **seven open Draft PRs** (#17–#23, see table at top) and no other open feature PRs. Inspect `gh pr list` / `git log origin/main` before starting: history may have moved since this document was written.
 - **Branch naming:** `feat/<milestone>-<slug>` for features, `docs/<slug>` for documentation; create focused commits; never force-push; PRs target `main` and stay Draft/open until the owner authorizes merge.
 - **Never** rewrite history, reset a stale local main, or delete someone else's branch.
 - **Durable context lives in the repository and GitHub** (README, HANDOFF, docs, issues/PRs, CI). Do not rely on agent-private memory directories; if a harness has extra memory, treat it as non-authoritative.
@@ -447,4 +462,4 @@ This architecture keeps everything testable, reproducible, and debuggable. The p
 
 ---
 
-*End of handoff. Checkpoint: main `231cd9` (PR #15 merged, D-16 integrated), 519 tests passing on the exact SHA and CI green on 2026-10-29. D-22's input validation is implemented in its Draft PR; check the live PR and current `origin/main` before acting. This document is not a substitute for Git.*
+*End of handoff. Checkpoint: main `4d01e78` (PR #16 merged, D-22 integrated; 643 tests at that SHA), with P3 fixes pending in Draft PRs #17–#23 (CI green on each head; 643–670 tests depending on the PR). Check the live PRs and current `origin/main` before acting. This document is not a substitute for Git.*

@@ -23,6 +23,13 @@ documind-web
 - OCR text never enters logs; errors return stable messages.
 - Exports re-apply the CSV formula-injection policy and sanitize
   filenames (`[^A-Za-z0-9._-]` → `_`, length-capped).
+- CSV output is **UTF-8 without BOM** everywhere (CLI tables CSV and web
+  exports, D-21). Data is intact; Excel-on-Windows renders Vietnamese
+  incorrectly unless the file is imported explicitly (Data → From
+  Text/UTF-8) or opened in LibreOffice. Switching the default to
+  `utf-8-sig` is a recorded owner decision, not a silent change — it
+  would alter the byte output of every export and can upset BOM-sensitive
+  tooling.
 
 ## Endpoints
 

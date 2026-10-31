@@ -33,7 +33,10 @@ Exit codes: `0` success, `2` invalid manifest/files.
 Paths resolve **relative to the manifest file's directory**. Validation
 is strict: unknown task, unknown provenance, empty `documents`, missing
 fields, duplicate ids, or malformed JSON all fail loudly
-(`ManifestError`).
+(`ManifestError`). Relative paths are not jailed to the manifest's
+directory (D-25, by design): a manifest is a locally authored trust
+boundary and its paths may point anywhere the user can read — never
+treat a manifest from an untrusted source as safe.
 
 **Dataset provenance** is explicit metadata that travels into every
 summary (`dataset.provenance`) and generated report. It defaults to
@@ -75,6 +78,18 @@ contents or cell text.
   untouched. A partially evaluated aggregate is never published.
 - Metric definitions, denominators, null semantics and strict matching
   are unchanged by validation.
+
+**Resource allocation (D-22 follow-up, recorded decision).** Structural
+validation deliberately sets **no upper cap on `rows × columns`**. A
+declared shape cannot inflate memory by itself: ground-truth `cells`
+must be a physical `rows × columns` matrix and predicted cells arrive as
+an explicit list, so the memory an evaluation pass uses is bounded by
+the input file sizes the owner chose to place on disk. `documind-eval`
+is a local, single-user tool whose manifests are authored by the same
+person who runs it — the trust boundary is the filesystem, not a network
+peer. If evaluation ever runs on untrusted uploads, add an explicit
+cell-count budget at that new boundary (with tests), not a silent cap
+here.
 
 ## Task 1 — OCR (CER / WER)
 
