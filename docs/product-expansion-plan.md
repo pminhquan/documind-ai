@@ -24,11 +24,11 @@ HEAD.
 [40843248171](https://github.com/pminhquan/documind-ai/actions/runs/40843248171)).
 D-16's short-receipt line-item extraction is integrated on `main`.
 
-**D-22 merge checkpoint:** evaluation-input validation is merged into
-`main` via PR #16 (merge commit
-`4d01e78ec95d58f3b7ca2113da08489e8ec1092d`); do not reimplement it. The
-relevant P3 audit follow-ups are the open Draft PRs #17–#23 (see
-`HANDOFF.md` for the dated snapshot of their state).
+**P3 integration release (2026-10-31):** D-22 is merged via PR #16
+(`4d01e78`) and the P3 audit follow-ups via PRs #17–#23 (merge commits
+`3f4bab3`, `0df8a68`, `418ac5c`, `e9bcbb0`, `1f10ab9`, `b727bbd`,
+`c1528ab`; combined baseline 715 tests) — do not reimplement them.
+See `HANDOFF.md` for the full merge/CI record.
 
 **Ground rules:** quality over quantity; no invented benchmarks or
 accuracy claims; real-document evaluation stays pending until
@@ -53,6 +53,7 @@ deployment in the current scope.
 | Post-audit regression fixes | ✅ Integrated | P1/P2 audit fixes, D-17, D-19, XLSX title safety |
 | D-16 — short-receipt line items | ✅ Merged | PR #15 merge commit `231cd9`; headerless extraction integrated and tested |
 | D-22 — malformed eval inputs | ✅ Merged (PR #16) | Structural validation for prediction/ground-truth data; merge commit `4d01e78` on `main` |
+| P3 audit batch — D-20, D-23/D-24, D-28–D-34 | ✅ Merged (PRs #17–#23) | Signed totals, two-digit years + locale-free months, dataset lifecycle guards, word-level qty × price, header provenance, line tolerance, temp cleanup, OCR JSON guard; merge commits `3f4bab3`…`c1528ab` |
 | M4B Phase 2 — real-document evaluation | 🔲 Pending | Blocked on privacy-cleared, manually annotated data |
 | M3B — borderless tables | 🔲 Deferred | Model-based structure recognition; later milestone |
 
@@ -199,10 +200,9 @@ removed. Git history retains the old plans if needed.
 1. Inspect Git: `git status --short`, `git branch --show-current`,
    `git fetch origin`, `git rev-parse origin/main`.
 2. Read `AGENTS.md` and `HANDOFF.md` before editing.
-3. Check live Git: D-16 (PR #15) and D-22 (PR #16) are integrated on
-   `main`; do not reimplement them. The P3 audit follow-ups live in
-   open Draft PRs — read `HANDOFF.md` for their dated snapshot before
-   assuming any status.
+3. Check live Git: D-16 (PR #15), D-22 (PR #16) and the P3 audit batch
+   (PRs #17–#23) are integrated on `main`; do not reimplement them.
+   Read `HANDOFF.md` for the merge/CI record before assuming status.
 4. Base new work on the latest verified `origin/main`, not a stale local
    `main`; prefer a dedicated worktree.
 5. Create a focused branch (`feat/<milestone>-<slug>` or `docs/<slug>`).

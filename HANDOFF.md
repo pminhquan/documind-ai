@@ -6,36 +6,21 @@
 
 **Project state:** M0/M1, M2, M3A, M4A, M4B Phase 1, M5A, M5B (including D-18), M5C extraction rules, and M5D synthetic performance baseline are complete and integrated on `main`. M4B Phase 2 remains pending real labeled data.
 
-**2026-10-31 checkpoint (post-Windows-reinstall recovery + P3 audit batch):** verified `origin/main` @ `4d01e78ec95d58f3b7ca2113da08489e8ec1092d` (PR #16 merge, D-22 integrated; 643 tests green locally on a rebuilt Python 3.12.10 venv). The remaining reproducible P3 audit items were implemented in **seven open Draft PRs** targeting `main` (review/merge order: #17 → #18 → #19 → #20 → #21 → #22 → #23; all CI-green on their exact head SHA). **This is a dated 2026-10-31 snapshot of open-PR state — once these PRs merge, the table below describes history, not the current state; consult `gh pr list` for live status.**
+**2026-10-31 P3 integration release.** Starting from verified `origin/main` @ `4d01e78ec95d58f3b7ca2113da08489e8ec1092d` (PR #16 merge; 643 tests), the seven engineering PRs below were **merged into `main` on 2026-10-31** in the reviewed order (#17 → #18 → #19 → #20 → #21 → #22 → #23), each through a regular two-parent merge commit of its exact reviewed head, each confirmed by a green CI run on the resulting main SHA, with per-stage pytest totals matching the additive cross-check. The combined baseline on main after PR #23 is **715 passing tests** (ruff and the frontend gate green). This documentation PR #24 is the final step of the release. The table also preserves the pre-merge heads as a dated historical snapshot.
 
-Heads and CI below are the post-review values verified on 2026-10-31; the per-PR test count is the exact pytest total from that PR's CI log (independent branches — these are not additive):
+PR branches were based on `4d01e78` (independent, non-stacked); the per-PR test count is that PR's own CI total on its branch — the **integrated** total after each merge is listed separately:
 
-| PR | Branch / head | Defect | CI-verified tests | CI run |
-|----|---------------|--------|-------------------|--------|
-| #17 | `fix/d23-d24-dataset-lifecycle` @ `defee19` | D-23, D-24 | 648 | [41190483549](https://github.com/pminhquan/documind-ai/actions/runs/41190483549) |
-| #18 | `fix/d29-d30-d20-signed-amounts-dates` @ `17bee92` | D-29, D-30, D-20 | 691 | [41189309375](https://github.com/pminhquan/documind-ai/actions/runs/41189309375) |
-| #19 | `fix/d31-word-level-qty-price` @ `9236b23` | D-31 | 649 | [41189908070](https://github.com/pminhquan/documind-ai/actions/runs/41189908070) |
-| #20 | `fix/d32-header-provenance` @ `6bf7e12` | D-32 | 647 | [41186516167](https://github.com/pminhquan/documind-ai/actions/runs/41186516167) |
-| #21 | `fix/d34-assign-line-tolerance` @ `42c0d07` | D-34 | 649 | [41190169093](https://github.com/pminhquan/documind-ai/actions/runs/41190169093) |
-| #22 | `fix/d33-temp-cleanup` @ `57a0cd1` | D-33 | 644 | [41186999690](https://github.com/pminhquan/documind-ai/actions/runs/41186999690) |
-| #23 | `fix/d28-ocr-json-byte-guard` @ `469879c` | D-28 | 645 | [41187133199](https://github.com/pminhquan/documind-ai/actions/runs/41187133199) |
+| PR | Branch @ reviewed head | Defect | Merge commit (main) | Post-merge CI | Tests after merge |
+|----|------------------------|--------|---------------------|---------------|-------------------|
+| #17 | `fix/d23-d24-dataset-lifecycle` @ `defee19` | D-23, D-24 | `3f4bab3` | [41192946913](https://github.com/pminhquan/documind-ai/actions/runs/41192946913) | 648 |
+| #18 | `fix/d29-d30-d20-signed-amounts-dates` @ `17bee92` | D-29, D-30, D-20 | `0df8a68` | [41193058369](https://github.com/pminhquan/documind-ai/actions/runs/41193058369) | 696 |
+| #19 | `fix/d31-word-level-qty-price` @ `9236b23` | D-31 | `418ac5c` | [41193148990](https://github.com/pminhquan/documind-ai/actions/runs/41193148990) | 702 |
+| #20 | `fix/d32-header-provenance` @ `6bf7e12` | D-32 | `e9bcbb0` | [41193231289](https://github.com/pminhquan/documind-ai/actions/runs/41193231289) | 706 |
+| #21 | `fix/d34-assign-line-tolerance` @ `42c0d07` | D-34 | `1f10ab9` | [41193801548](https://github.com/pminhquan/documind-ai/actions/runs/41193801548) | 712 |
+| #22 | `fix/d33-temp-cleanup` @ `57a0cd1` | D-33 | `b727bbd` | [41193870275](https://github.com/pminhquan/documind-ai/actions/runs/41193870275) | 713 |
+| #23 | `fix/d28-ocr-json-byte-guard` @ `469879c` | D-28 | `c1528ab` | [41193945173](https://github.com/pminhquan/documind-ai/actions/runs/41193945173) | 715 |
 
-**Cumulative integration dry-run (2026-10-31, verified):** on a throwaway
-worktree/branch at `origin/main` @ `4d01e78` (never pushed, removed
-afterwards), the seven heads above were merged sequentially (#17 → #18 →
-#19 → #20 → #21 → #22 → #23) with ordinary local merge commits. All
-seven merges were conflict-free; shared files (`extractor.py`,
-`parsing.py`, `tests/test_extraction.py`) kept every regression test;
-the review-fix versions (tight-label regex, qty-only guard) survived.
-The combined tree collected and passed **715 pytest tests** (643 main +
-72 additive across the seven PRs — matches the per-PR CI counts),
-with ruff and the frontend gate green, `git diff --check` clean, and
-synthetic end-to-end checks passing for signed totals (incl. the tight
-label `TOTAL:-5.00`), two-digit-year and textual dates, word-level
-quantity rows (with and without a printed total), split-region header
-provenance, D-16 headerless receipts, and D-22 malformed-input
-rejection. No evaluation metric files were touched by any of the seven
-PRs.
+A cumulative dry-run on a throwaway worktree (never pushed, removed afterwards) had predicted these totals before the real merges; every real post-merge CI run matched the prediction exactly. Post-merge synthetic acceptance on an isolated checkout of `c1528ab` passed for D-16 receipts, D-22 rejection, D-23/D-24 lifecycle, signed/tight-label totals, dates and textual months, word-level quantity rows, header provenance, tiny-leading-token table assignment, temp-PNG cleanup and the OCR JSON size guard; `git diff 4d01e78..main -- src/documind/evaluation/` is empty — no metric definition or denominator changed.
 
 Closed as already-resolved or documented without code changes: **D-27** (correction keys use per-File sequential doc ids — no name collisions), **D-25** and **D-26** (documented in `docs/evaluation-spec.md` / `pdf.py` docstring), **D-21** (UTF-8-without-BOM documented as existing compatibility behavior with a **pending product decision** in `docs/web-api.md`), and the evaluation `rows × columns` allocation risk (documented in `docs/evaluation-spec.md`: the table evaluator allocates its expected-shape grid from the GROUND-TRUTH side's declared dimensions — sparse ground truth with enormous declared dimensions passes validation and can exhaust memory, so file size alone does not bound memory; accepted local-tool risk, with resource budgeting recorded as an unresolved backlog item). None of these PRs are merged; the owner reviews and merges. The recovery session also rebuilt the Windows environment: Python 3.12.10 via winget, repaired `.venv` (packages preserved), Node.js LTS for the frontend gate, and fixed post-reinstall file-ownership (old-SID ACLs) that blocked git/pip writes.
 
@@ -443,7 +428,7 @@ Documentation changes must still keep `python scripts/verify.py` green.
 
 D-16 (PR #15) and D-22 (PR #16) are integrated on `main` @ `4d01e78`. The reproducible P3 audit items (D-20, D-23, D-24, D-28–D-34 minus D-27) are implemented in open Draft PRs #17–#23 — review and merge those first (order above). Remaining backlog, in recommended order:
 
-1. **Merge review of PRs #17–#23** (all independent, based on `4d01e78`; no stacking). After merges, re-run `python scripts/verify.py` on the updated `main`.
+1. ~~Merge review of PRs #17–#23~~ — **done 2026-10-31**: all seven merged with verified per-stage CI; combined baseline **715 tests** on `main`.
 2. **M4B Phase 2 — real-document evaluation:** collect privacy-cleared, manually annotated documents (10–20 pilot: Vietnamese receipts, invoice-style pages, ruled-table pages), onboard via `documind-dataset`, evaluate with provenance `real`, and publish the first honest accuracy report. Data collection/annotation can proceed in parallel with task 1 when data becomes available.
 3. **Vietnamese OCR model/language benchmarking:** compare `lang="vi"` vs `lang="en"` on the real set after M4B Phase 2 evidence; record a model-selection decision before tuning.
 4. **M3B — borderless tables:** deferred; requires a model-based structure recognizer and should follow real-data evidence.
@@ -481,4 +466,4 @@ This architecture keeps everything testable, reproducible, and debuggable. The p
 
 ---
 
-*End of handoff. Checkpoint: main `4d01e78` (PR #16 merged, D-22 integrated; 643 tests at that SHA), with P3 fixes pending in Draft PRs #17–#23 (CI green on each head; per-PR CI totals 643–691 tests on independent branches — see the table above). Check the live PRs and current `origin/main` before acting. This document is not a substitute for Git.*
+*End of handoff. Release checkpoint 2026-10-31: main `c1528ab` — PRs #17–#23 merged with per-stage CI verified and a **715-test** combined baseline; documentation PR #24 (this document) completes the release. Check live `origin/main` before acting. This document is not a substitute for Git.*

@@ -18,9 +18,12 @@ and M5D synthetic performance baseline are implemented and integrated on
 `main` (post-D18 checkpoint: PR #13,
 `130f32207e316330cba15d31c23558c6a2987607`). D-16's short-receipt
 line-item recovery is merged into `main` via PR #15 (merge commit
-`231cd9`). D-22's evaluation-input validation is implemented in its
-Draft PR; check the live PR and current `main` HEAD for integration
-status. Real-document accuracy evaluation is **pending**
+`231cd9`), D-22's evaluation-input validation via PR #16
+(`4d01e78`), and the 2026-10-31 P3 audit batch — signed monetary
+values, two-digit-year and locale-independent dates, dataset lifecycle
+guards, word-level qty × price, header provenance, table line
+tolerance, temp-file safety and the OCR JSON size guard — via PRs
+#17–#23. Real-document accuracy evaluation is **pending**
 privacy-cleared, manually annotated data. There is no LLM, no model
 training, and no database.
 
@@ -57,8 +60,7 @@ results.
   `documind-eval`, `documind-dataset`.
 - Evaluation framework (CER/WER, invoice field accuracy, strict table
   agreement) and synthetic evaluation reports.
-- Evaluation input validation (D-22; source revision: Draft PR — check
-  the live PR and current `main` HEAD for integration status): malformed
+- Evaluation input validation (D-22, merged via PR #16): malformed
   prediction/ground-truth containers fail with exit code 2 and
   `Evaluation error:`, without tracebacks or partial metrics.
 - Vietnamese invoice label and money rules at the extraction layer
