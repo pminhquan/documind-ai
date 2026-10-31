@@ -115,7 +115,16 @@ def add_document(image: str | Path, document_id: str, root: str | Path | None = 
             "and docs/dataset-annotation-guide.md)"
         )
     base = dataset_root(root)
+    if not (base / "README.md").is_file():
+        raise DatasetError(
+            f"dataset not initialized at '{base}': run 'documind-dataset init' first"
+        )
     anonymized_dir = base / "anonymized"
+    if not anonymized_dir.is_dir():
+        raise DatasetError(
+            f"dataset layout incomplete at '{base}': 'anonymized/' is missing — "
+            "run 'documind-dataset init' to recreate the layout"
+        )
     for existing in anonymized_dir.iterdir() if anonymized_dir.is_dir() else []:
         if existing.stem == document_id:
             raise DatasetError(
@@ -233,7 +242,10 @@ def validate_dataset(root: str | Path | None = None) -> tuple[bool, list[str]]:
     every error found, and per-task readiness. ``ok`` is False when at
     least one error exists. Readiness ("ready to evaluate") means the
     task has annotated documents AND a valid manifest whose prediction
-    files all exist — it is reported separately from structural validity.
+    files all exist AND whose entries exactly cover the annotated
+    documents — annotations added after the last ``predict`` or manifest
+    entries whose ground truth disappeared make the task not ready. It is
+    reported separately from structural validity.
     """
     base = dataset_root(root)
     lines: list[str] = [f"dataset root: {base}"]
@@ -256,6 +268,7 @@ def validate_dataset(root: str | Path | None = None) -> tuple[bool, list[str]]:
     # Manifests: valid ones with all prediction files present mark their
     # task as ready to evaluate.
     manifest_status: dict[str, bool] = {}
+    manifest_ids: dict[str, set[str]] = {}
     for manifest_path in sorted(base.glob("manifest-*.json")):
         match = re.fullmatch(r"manifest-(.+)\.json", manifest_path.name)
         task = match.group(1) if match else None
@@ -285,15 +298,44 @@ def validate_dataset(root: str | Path | None = None) -> tuple[bool, list[str]]:
         )
         if task in TASKS:
             manifest_status[task] = True
+            manifest_ids[task] = {entry.id for entry in manifest.entries}
 
     annotated_counts: dict[str, int] = {}
+    annotated_ids: dict[str, set[str]] = {}
     for task in TASKS:
-        annotated = [
-            image for image in images
+        ids = {
+            image.stem for image in images
             if (base / "ground_truth" / f"{image.stem}{GT_SUFFIXES[task]}").exists()
-        ]
-        annotated_counts[task] = len(annotated)
-        lines.append(f"  {task}: {len(annotated)}/{len(images)} annotated")
+        }
+        annotated_ids[task] = ids
+        annotated_counts[task] = len(ids)
+        lines.append(f"  {task}: {len(ids)}/{len(images)} annotated")
+
+    # Manifest coverage must match the annotated set exactly: entries whose
+    # ground truth disappeared are stale, annotations added after the last
+    # predict are missing from the manifest — either way the manifest is
+    # out of date and the task is not ready until predict regenerates it.
+    for task in TASKS:
+        if not manifest_status.get(task):
+            continue
+        stale = sorted(manifest_ids[task] - annotated_ids[task])
+        untracked = sorted(annotated_ids[task] - manifest_ids[task])
+        if not stale and not untracked:
+            continue
+        manifest_status[task] = False
+        if stale:
+            errors.append(
+                f"{MANIFEST_NAME.format(task=task)}: manifest entries without "
+                f"ground truth ({', '.join(stale)}) — run 'documind-dataset "
+                f"predict --task {task}' to refresh the manifest"
+            )
+        if untracked:
+            errors.append(
+                f"{MANIFEST_NAME.format(task=task)}: annotated document(s) "
+                f"missing from the manifest ({', '.join(untracked)}) — "
+                "annotated after the last predict; run 'documind-dataset "
+                f"predict --task {task}'"
+            )
 
     for image in images:
         for task in TASKS:

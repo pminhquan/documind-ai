@@ -23,7 +23,10 @@ documind-dataset add path\to\anonymized-receipt.jpg --id receipt-001 --confirm-a
 #    data/eval/real/ground_truth/receipt-001.table.json
 
 # 4. Check structure + annotation completeness (placeholders, required
-#    keys, table matrix shapes, manifest validity):
+#    keys, table matrix shapes, manifest validity and coverage — a task
+#    is only reported ready to evaluate when its manifest entries exactly
+#    cover the annotated documents; annotations added after the last
+#    predict, or entries whose ground truth disappeared, are flagged):
 documind-dataset validate
 
 # 5. Run the existing pipelines on annotated documents (local venv;
