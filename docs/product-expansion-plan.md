@@ -130,34 +130,35 @@ synthetic input, not recognition-accuracy results.
 - All automated tests use mocked/synthetic/geometry-only inputs; the
   benchmark and historical smoke tests are not real-world accuracy
   evidence. M4B Phase 2 is the only path to genuine metrics.
-- Open defects include other P3 audit items; D-22's input validation is
-  implemented in its Draft PR (check the live PR and current `main` HEAD
-  for integration status). D-16 is integrated on `main`. Revalidate the
-  audit against current code before starting remaining items.
+- The 2026-10-26 audit is closed on `main` @ `346d1c5` (715-test
+  baseline): D-16 via PR #15, D-22 via PR #16, and the P3 batch via
+  PRs #17–#23. D-21 stays a pending product decision; evaluation
+  rows×columns resource budgeting stays an unresolved backlog item.
 
 ## Next tasks
 
-D-16 is integrated on `main` (PR #15, merge commit `231cd9`). D-22's
-input validation is implemented in its Draft PR; verify the live PR and
-current `main` HEAD before assuming integration. After D-22, the
-remaining tasks below are ordered by prerequisite value; no new
+The 2026-10-26 audit is fully integrated on `main` @ `346d1c5`
+(715-test baseline): D-16 via PR #15 (`231cd9`), D-22 via PR #16
+(`4d01e78`), and the P3 batch (D-20, D-23/D-24, D-28–D-34) via
+PRs #17–#23 (merge commits `3f4bab3` through `c1528ab`, 2026-10-31).
+The remaining tasks below are ordered by prerequisite value; no new
 milestone should begin without its data/decision dependency.
 
-1. **Relevant P3 audit items.** Revalidate and prioritize
-   export/data-integrity defects (e.g. D-20 locale-sensitive parsing,
-   D-21 CSV BOM, D-23/D-24 dataset lifecycle) ahead of speculative
-   features.
-2. **M4B Phase 2 — real-document evaluation.** Collect 10–20
-   privacy-cleared documents (Vietnamese receipts, invoice-style pages,
-   ruled-table pages), annotate by hand, onboard with
-   `documind-dataset`, predict, and evaluate with `provenance: real`.
-   Publish the first honest accuracy report. Data collection may proceed
-   in parallel with task 1.
-3. **Vietnamese OCR benchmarking.** Compare `lang="vi"` vs `lang="en"` on
+1. **M4B Phase 2 — real-document evaluation (current next task,
+   blocked).** Collect 10–20 privacy-cleared documents (Vietnamese
+   receipts, invoice-style pages, ruled-table pages), annotate by hand,
+   onboard with `documind-dataset`, predict, and evaluate with
+   `provenance: real`. Publish the first honest accuracy report.
+   Blocked until legitimate, privacy-cleared, manually annotated data
+   exists.
+2. **Vietnamese OCR benchmarking.** Compare `lang="vi"` vs `lang="en"` on
    the real evaluation set; record a model-selection decision before
    tuning.
-4. **M3B — borderless table recognition.** Deferred until ruled-table
+3. **M3B — borderless table recognition.** Deferred until ruled-table
    evidence and real-document evaluation are established.
+4. **Evaluation resource budgeting (backlog).** Dimension/cell-count
+   caps at the evaluation boundary if evaluation ever sees untrusted
+   inputs (see `docs/evaluation-spec.md`).
 
 ## Historical context
 

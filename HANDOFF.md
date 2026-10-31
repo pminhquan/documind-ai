@@ -26,9 +26,9 @@ Closed as already-resolved or documented without code changes: **D-27** (correct
 
 **Dated release checkpoint:** at the post-D18 release checkpoint, main SHA `130f322` had **392 passing pytest tests**; CI run [40439790177](https://github.com/pminhquan/documind-ai/actions/runs/40439790177) completed successfully. This is a historical verified snapshot, not a promise that future HEADs always have 392 tests.
 
-**D-16 / PR #15:** merged into `main` via PR #15 (merge commit `231cd909924f75b4d46816ca028bbdca5b6107ef`, 2026-10-29; 519 tests, CI run [40843248171](https://github.com/pminhquan/documind-ai/actions/runs/40843248171)). The base `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge) did **not** contain D-16. **D-22 / PR #16:** evaluation-input validation is merged on `main` (merge commit `4d01e78ec95d58f3b7ca2113da08489e8ec1092d`); do not reimplement it. The relevant P3 audit follow-ups are the open Draft PRs #17–#23 (dated snapshot below).
+**D-16 / PR #15:** merged into `main` via PR #15 (merge commit `231cd909924f75b4d46816ca028bbdca5b6107ef`, 2026-10-29; 519 tests, CI run [40843248171](https://github.com/pminhquan/documind-ai/actions/runs/40843248171)). The base `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge) did **not** contain D-16. **D-22 / PR #16:** evaluation-input validation is merged on `main` (merge commit `4d01e78ec95d58f3b7ca2113da08489e8ec1092d`); do not reimplement it. The P3 audit follow-ups were merged via PRs #17–#23 on 2026-10-31 (release record below).
 
-> For a new agent: read this file together with `AGENTS.md`, then inspect Git and the code. Do not use a stale local `main` as the base; fetch and branch from `origin/main`. This document covers the post-D18 state, the PR #14 integration base, D-16 and D-22 on `main`, and the 2026-10-31 P3 Draft-PR batch; if HEAD has moved, `git log` and CI are authoritative.
+> For a new agent: read this file together with `AGENTS.md`, then inspect Git and the code. Do not use a stale local `main` as the base; fetch and branch from `origin/main`. This document covers the post-D18 state, the PR #14 integration base, D-16 and D-22 on `main`, and the 2026-10-31 P3 release (PRs #17–#23 merged); if HEAD has moved, `git log` and CI are authoritative.
 
 ---
 
@@ -320,7 +320,7 @@ At the post-D18 release checkpoint (2026-10-27), main SHA `130f32207e316330cba15
 | **Batch UI shows the last document** | There is no full batch navigator in the results panel |
 | **CSV UTF-8 without BOM** | Excel on Windows may display Vietnamese text incorrectly (D-21) |
 | **Long single-export filenames** | A very long stem can lose its extension at the 100-character download-header cap; batch ZIP is safe |
-| **Remaining audit defects** | D-16 (PR #15) and D-22 (PR #16) are integrated on `main` @ `4d01e78`; the remaining P3 items are the open Draft PRs #17–#23 (2026-10-31 snapshot — check live state); revalidate against current code before starting |
+| **Remaining audit defects** | None open from the 2026-10-26 audit: D-16 (PR #15), D-22 (PR #16) and the P3 batch (PRs #17–#23) are integrated on `main` @ `346d1c5` (715 tests); D-21 stays a pending product decision |
 | **Local-only** | 127.0.0.1, no CORS, no auth; do not expose |
 
 ---
@@ -341,7 +341,8 @@ At the post-D18 release checkpoint (2026-10-27), main SHA `130f32207e316330cba15
 | **Post-audit fixes** | ✅ Integrated | P1/P2 audit regressions; D-17 export 422 contract; D-19 stable source labels; XLSX worksheet-title hardening |
 | **M4B Phase 2** | 🔲 Pending | Needs privacy-cleared, manually annotated real documents |
 | **D-16** | ✅ Merged | PR #15 merge commit `231cd9`; short-receipt line-item extraction integrated and tested |
-| **D-22** | 🟡 Implemented in Draft PR | Structural validation for malformed evaluation payloads; check the live PR and current `main` HEAD for integration status |
+| **D-22** | ✅ Merged | PR #16 merge commit `4d01e78`; structural validation for malformed evaluation payloads integrated and tested |
+| **P3 audit batch** | ✅ Merged | PRs #17–#23 merge commits `3f4bab3`…`c1528ab`; D-20, D-23/D-24 and D-28–D-34 integrated (release record above) |
 | **M3B** | 🔲 Deferred | Borderless table recognition (model-based) |
 
 ---
@@ -420,16 +421,16 @@ Documentation changes must still keep `python scripts/verify.py` green.
 11. **Long single-export filename:** the 100-character download-header cap can truncate the stem and lose the extension; prefer batch ZIP for long names until fixed.
 12. **CSV BOM (D-21):** UTF-8 without BOM; import explicitly in Excel on Windows.
 13. **Browser smoke ≠ accuracy:** mocked inference in Chromium proves UI wiring only.
-14. **Open defects:** D-16 is integrated on `main` (PR #15). D-22's input validation is implemented in its Draft PR; check the live PR and current `main` HEAD to determine integration status. Other P3 audit items remain open. Do not mark any fixed on `main` without tests and a merge.
+14. **Open defects:** none from the 2026-10-26 audit — D-16 (PR #15), D-22 (PR #16) and the P3 batch (PRs #17–#23) are merged and tested on `main` @ `346d1c5`. D-21 remains a pending product decision and evaluation rows×columns resource budgeting an unresolved backlog. Do not mark anything fixed on `main` without tests and a merge.
 
 ---
 
 ## 11. Next Engineering Work
 
-D-16 (PR #15) and D-22 (PR #16) are integrated on `main` @ `4d01e78`. The reproducible P3 audit items (D-20, D-23, D-24, D-28–D-34 minus D-27) are implemented in open Draft PRs #17–#23 — review and merge those first (order above). Remaining backlog, in recommended order:
+The 2026-10-26 audit is fully integrated: D-16 (PR #15), D-22 (PR #16) and the P3 batch (PRs #17–#23 — D-20, D-23/D-24, D-28–D-34; D-27 was already resolved) are merged on `main` @ `346d1c5` with a 715-test baseline. Remaining backlog, in recommended order:
 
 1. ~~Merge review of PRs #17–#23~~ — **done 2026-10-31**: all seven merged with verified per-stage CI; combined baseline **715 tests** on `main`.
-2. **M4B Phase 2 — real-document evaluation:** collect privacy-cleared, manually annotated documents (10–20 pilot: Vietnamese receipts, invoice-style pages, ruled-table pages), onboard via `documind-dataset`, evaluate with provenance `real`, and publish the first honest accuracy report. Data collection/annotation can proceed in parallel with task 1 when data becomes available.
+2. **M4B Phase 2 — real-document evaluation (current next task, blocked):** collect privacy-cleared, manually annotated documents (10–20 pilot: Vietnamese receipts, invoice-style pages, ruled-table pages), onboard via `documind-dataset`, evaluate with provenance `real`, and publish the first honest accuracy report. Blocked until legitimate, privacy-cleared, manually annotated data exists — data collection/annotation can start any time that data becomes available.
 3. **Vietnamese OCR model/language benchmarking:** compare `lang="vi"` vs `lang="en"` on the real set after M4B Phase 2 evidence; record a model-selection decision before tuning.
 4. **M3B — borderless tables:** deferred; requires a model-based structure recognizer and should follow real-data evidence.
 
@@ -444,7 +445,7 @@ Do not start a new milestone before its prerequisite data/decision exists. Do no
 - **PR #15 base (historical):** `31a8f1bde0328402cb976b7e0f257871ebc2848b` (PR #14 merge). That base does **not** contain D-16; D-16 was implemented in PR #15 and is now merged at `231cd9`.
 - **PR #13:** merged; the `fix/m5b-pdf-page-level-exports` branch is retained (not deleted).
 - **D-22 merge checkpoint:** `origin/main` @ `4d01e78ec95d58f3b7ca2113da08489e8ec1092d` (PR #16 merged; 643 tests at that SHA).
-- As of the 2026-10-31 checkpoint there are **seven open Draft PRs** (#17–#23, see table at top) and no other open feature PRs. Inspect `gh pr list` / `git log origin/main` before starting: history may have moved since this document was written.
+- **2026-10-31 pre-release snapshot (historical):** at that checkpoint there were seven Draft PRs (#17–#23); all were merged the same day after review — merge commits and CI in the release table above. After the release no feature PRs are open. Inspect `gh pr list` / `git log origin/main` before starting: history may have moved since this document was written.
 - **Branch naming:** `feat/<milestone>-<slug>` for features, `docs/<slug>` for documentation; create focused commits; never force-push; PRs target `main` and stay Draft/open until the owner authorizes merge.
 - **Never** rewrite history, reset a stale local main, or delete someone else's branch.
 - **Durable context lives in the repository and GitHub** (README, HANDOFF, docs, issues/PRs, CI). Do not rely on agent-private memory directories; if a harness has extra memory, treat it as non-authoritative.
