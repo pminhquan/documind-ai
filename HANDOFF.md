@@ -462,4 +462,4 @@ This architecture keeps everything testable, reproducible, and debuggable. The p
 
 ---
 
-*End of handoff. Checkpoint: main `4d01e78` (PR #16 merged, D-22 integrated; 643 tests at that SHA), with P3 fixes pending in Draft PRs #17–#23 (CI green on each head; 643–670 tests depending on the PR). Check the live PRs and current `origin/main` before acting. This document is not a substitute for Git.*
+*End of handoff. Checkpoint: main `4d01e78` (PR #16 merged, D-22 integrated; 643 tests at that SHA), with P3 fixes pending in Draft PRs #17–#23 (CI green on each head; 644–678 collected tests depending on the PR, counted per independent branch). Check the live PRs and current `origin/main` before acting. This document is not a substitute for Git.*
